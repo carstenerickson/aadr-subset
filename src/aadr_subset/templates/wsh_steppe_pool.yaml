@@ -1,26 +1,39 @@
 # Western Steppe Herder (WSH) pool starter template.
 #
-# STARTING POINT — audit Group_IDs against your target .anno before use.
-tested_against: [v66.0]
+# Verified against AADR v62.0. Source pool for "WSH" / "Steppe"
+# ancestry in qpAdm-style modeling. AADR breaks Yamnaya out by
+# country/region: Russia_Samara, Russia_Kalmykia, Russia_Caucasus,
+# Bulgaria, Kazakhstan, Ukraine, Serbia, Hungary.
+tested_against: [v62.0]
 last_verified: '2026-05-12'
 maintainer: aadr-subset
 notes: |
-  Source pool for "WSH" ancestry in qpAdm-style modeling. Yamnaya
-  (Samara), Poltavka, and closely related Eneolithic steppe groups.
-  Useful as a distal source population. The `any:` block lets you
-  mix groups whose date ranges differ slightly without imposing a
-  single tight window.
+  Classic distal-source pool for steppe ancestry: Yamnaya (Samara,
+  Kalmykia, Caucasus), Poltavka (Russia_MBA_Poltavka.AG), and the
+  Eneolithic-steppe / Caucasus-Eneolithic groups that precede Yamnaya
+  chronologically. The `any:` block lets each subgroup carry its own
+  appropriate date window — Eneolithic is older than Yamnaya, so
+  one universal range would either miss Eneolithic samples or stretch
+  too late for tight Yamnaya filtering.
 ---
 any:
-  - populations: [Yamnaya_Samara, Yamnaya_Kalmykia]
+  - populations:
+      - Russia_Samara_EBA_Yamnaya.AG
+      - Russia_Kalmykia_EBA_Yamnaya.SG
+      - Russia_Caucasus_EBA_Yamnaya.AG
+      - Russia_Ishkinovka_EBA_Yamnaya.AG
+      - Russia_Remontnoye_EBA_Yamnaya.SG
     date:
       min_calbp: 4500
       max_calbp: 5500
-  - populations: [Poltavka]
+  - populations:
+      - Russia_MBA_Poltavka.AG
     date:
       min_calbp: 4000
       max_calbp: 5000
-  - populations: [Eneolithic_steppe]
+  - populations:
+      - Russia_Steppe_Eneolithic.AG
+      - Russia_Caucasus_Eneolithic.AG
     date:
       min_calbp: 5000
       max_calbp: 7000

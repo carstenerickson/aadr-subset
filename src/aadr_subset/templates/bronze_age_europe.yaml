@@ -1,25 +1,34 @@
 # Bronze Age Europe starter template (~5000-2700 calBP).
 #
-# STARTING POINT — audit Group_IDs against your target .anno before use.
-tested_against: [v66.0]
+# Verified against AADR v62.0. Labels follow the AADR convention
+# `Country_(Period_)Culture.{AG|SG|DG}`; there is no pan-European
+# `Bell_Beaker` or `Corded_Ware` label — they're broken out by
+# country (Czechia, Germany, England, France, Poland, etc.).
+tested_against: [v62.0]
 last_verified: '2026-05-12'
 maintainer: aadr-subset
 notes: |
-  Pan-European Bronze Age cohort spanning Early-Late Bronze Age culturally
-  distinct labels (Bell Beaker, Corded Ware, Unetice). Date range covers
-  the conventional EBA-to-LBA span. Adjust populations to the specific
-  cultural horizon you care about; this is a wide tent useful for PCA
-  context but not for tight ancestry questions.
+  Pan-European Bronze Age cohort spanning the canonical archaeological
+  horizons (Bell Beaker, Corded Ware, Unetice, Yamnaya). Pulls from
+  several countries so the cohort is broad enough for PCA / clustering
+  context. For tight ancestry questions, narrow to one country per
+  horizon (e.g. just `Germany_BellBeaker.AG` + `Germany_CordedWare.AG`).
 ---
 date:
   min_calbp: 2700
   max_calbp: 5000
 populations:
-  - Bell_Beaker_Britain
-  - Bell_Beaker_Central_Europe
-  - Bell_Beaker_Iberia
-  - Corded_Ware_Germany
-  - Corded_Ware_Poland
-  - Unetice_Czech
-  - Yamnaya_Samara
+  - Czechia_BellBeaker.AG
+  - England_BellBeaker.AG
+  - England_EBA_BellBeaker.AG
+  - France_BellBeaker.AG
+  - Germany_BellBeaker.AG
+  - Germany_CordedWare.AG
+  - Czechia_EBA_CordedWare.AG
+  - Estonia_CordedWare.AG
+  - Latvia_LN_CordedWare.AG
+  - Poland_CordedWare.SG
+  - Czechia_EBA_Unetice.AG
+  - Russia_Samara_EBA_Yamnaya.AG
+  - Russia_Kalmykia_EBA_Yamnaya.SG
 min_coverage: 0.3

@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (Day 9 — verified template Group_ID literals against real v62.0)
+
+The Day-8 starter templates shipped with plausible-looking Group_ID
+literals that turned out to be largely wrong: AADR uses
+`Country_Period_Culture.{AG|SG|DG}` rather than the short
+`Region.Period` form the templates assumed. Audited all six against a
+real AADR v62.0 release and rewrote them with verified labels.
+Re-running each template through the engine now produces non-zero
+matches across the corpus.
+
+- **All 6 templates rewritten with v62.0-verified Group_IDs.**
+  Highlights:
+  - `iron_age_britain`: was `England.IA` (no match) → `England_IA.AG`
+    + `England_IA.SG` (9 matched samples in v62.0).
+  - `bronze_age_europe`: was `Bell_Beaker_Britain` etc. (no match) →
+    country-prefixed `England_BellBeaker.AG`, `Germany_CordedWare.AG`,
+    `Russia_Samara_EBA_Yamnaya.AG`, etc. (199 matched).
+  - `wsh_steppe_pool`: was `Yamnaya_Samara`, `Poltavka`,
+    `Eneolithic_steppe` → `Russia_Samara_EBA_Yamnaya.AG`,
+    `Russia_MBA_Poltavka.AG`, `Russia_Steppe_Eneolithic.AG` (21
+    matched).
+  - `neolithic_anatolia`: was `Anatolia_N`, `Barcin_N` → AADR's
+    `Turkey_Marmara_Barcin_N.{SG,AG,DG}` +
+    `Turkey_Central_Catalhoyuk_N.SG` etc. (28 matched).
+  - `viking_period_scandinavian`: was `Norway.VA`, `Sweden.VA` →
+    `Norway_Viking.SG`, `Sweden_Viking.SG` + the diaspora
+    (`Iceland_Viking.SG`, `England_Viking.SG`, ...). Two `any:`
+    branches split homeland from diaspora. (224 matched.)
+  - `modern_european`: was `English.SG`, `Italian_North.SG` (modern
+    samples don't carry `.SG` in AADR) → `English.{DG,HO}`,
+    `Italian_North.{DG,HO}`, `Russian.{DG,HO}`, etc. (493 matched.)
+  - Each template's metadata `tested_against:` updated `[v66.0]` →
+    `[v62.0]` to reflect what we actually verified against. Notes
+    block updated with explanation of the AADR labeling convention
+    and pointers to add-on labels (Roman, EarlyMedieval, etc.) for
+    each cohort.
+- **New `tests/integration/test_templates_against_real_anno.py`** —
+  parametrized over `list_templates()`; each test loads the
+  corresponding template, runs it through `engine.select_samples`
+  against a real v62.0 .anno, and asserts `n_matched > 0`. v62.0 is
+  class D (no native coverage), so the test passes
+  `coverage_column="snps_hit_1240k"` to route min_coverage filters
+  through the derived proxy.
+- **Gating via `AADR_V62_ANNO_PATH` env var.** AADR's data release
+  notes prohibit redistribution, so the .anno file can't be committed
+  to the repo. Tests self-skip with a clear message when the env var
+  isn't set (CI; first-time clones); contributors who have the public
+  release export `AADR_V62_ANNO_PATH=/path/to/v62.0_HO_public.anno`
+  to enable them locally. This is the audit-cadence test — re-run
+  when bumping `tested_against` or adding new templates.
+
 ### Added (Day 8 — template subcommand + 6 starter templates)
 
 `aadr-subset template` ships as the discovery aid for new users —

@@ -1,22 +1,28 @@
 # Iron Age Britain starter template (~2400-1900 calBP / ~450 BCE - 50 CE).
 #
-# STARTING POINT — audit Group_IDs against your target .anno before
-# using in production.
-tested_against: [v66.0]
+# Verified against AADR v62.0. The corpus carries `England_IA.AG` and
+# `England_IA.SG`; there is no `Scotland_IA` or `Wales_IA` label —
+# Scotland/Wales samples from the British Iron Age fall under broader
+# British labels or aren't sampled.
+tested_against: [v62.0]
 last_verified: '2026-05-12'
 maintainer: aadr-subset
 notes: |
-  Iron Age British Isles cohort. AADR Group_ID labels for this period
-  include England.IA, Scotland.IA, Wales.IA (and Ireland.IA where present).
-  The date range below brackets the British La Tène / Roman conquest era;
-  tighten to e.g. 2400-2000 to exclude post-conquest samples if you want
-  pre-Roman strictly. Minimum coverage 0.3x is conservative; AADR's
-  default panel typically holds at 1240k.
+  Pre-Roman Iron Age British cohort. The date window brackets the
+  conventional British La Tène era (~450 BCE - 50 CE). To include
+  Roman-era and Early Medieval samples, add `England_IA_Roman.SG`,
+  `England_IA_ERoman.SG`, and `England_IA_EarlyMedieval.AG`. To drop
+  outliers, append an `exclude:` block with `England_IA_o.SG`.
+
+  min_coverage: 0.3 against the native `coverage_1240k` column is
+  conservative — well above the array-genotype threshold but below
+  high-quality shotgun. On v62.0 (class D, no native coverage), pair
+  with `--coverage-derive snps_hit_1240k`; the proxy at 0.3 ≈ 345k of
+  1.148M targets observed.
 ---
 populations:
-  - England.IA
-  - Scotland.IA
-  - Wales.IA
+  - England_IA.AG
+  - England_IA.SG
 date:
   min_calbp: 1900
   max_calbp: 2400

@@ -1,23 +1,43 @@
-# Viking-period Scandinavian starter template (~1200-800 calBP / 750-1150 CE).
+# Viking-period Scandinavian + diaspora starter template
+# (~1200-800 calBP / ~750-1150 CE).
 #
-# STARTING POINT — audit Group_IDs against your target .anno before use.
-tested_against: [v66.0]
+# Verified against AADR v62.0. Labels follow
+# `{Country}_Viking.SG` (Margaryan et al. 2020 Nature panel).
+# EarlyViking and PreViking variants exist for some countries.
+tested_against: [v62.0]
 last_verified: '2026-05-12'
 maintainer: aadr-subset
 notes: |
-  Viking Age Scandinavian samples — Norway, Sweden, Denmark, plus
-  Norse-settled Iceland and the British Isles. Date range brackets the
-  conventional Viking Age (793 CE Lindisfarne to ~1100 CE). Population
-  labels in AADR cluster by modern country + Viking_Age qualifier; check
-  your .anno for the exact suffix convention.
+  Viking Age samples — Scandinavian homelands plus the diaspora
+  destinations (Iceland, England, Ireland, Scotland, Isle of Man,
+  Faroes, Poland, Russia). AADR labels all carry `.SG` (Margaryan
+  et al. 2020 was shotgun-sequenced).
+
+  Pre-/Early-Viking transitional groups (Norway_North_Pre_Viking,
+  Sweden_EarlyViking, Estonia_EarlyViking, etc.) are NOT included —
+  add them in a second `any:` branch if you want the long transition
+  window. The two branches below split homeland vs diaspora because
+  diaspora samples sometimes carry slightly later median dates.
 ---
 any:
-  - populations: [Norway.VA, Sweden.VA, Denmark.VA]
+  - populations:
+      - Norway_Viking.SG
+      - Sweden_Viking.SG
+      - Denmark_Viking.SG
+      - Gotland_Viking.SG
     date:
       min_calbp: 800
-      max_calbp: 1200
-  - populations: [Iceland.VA, England.VA, Ireland.VA]
+      max_calbp: 1300
+  - populations:
+      - Iceland_Viking.SG
+      - England_Viking.SG
+      - Ireland_Viking.SG
+      - Scotland_Viking.SG
+      - IsleOfMan_Viking.SG
+      - Faroes_Viking.SG
+      - Russia_Viking.SG
+      - Poland_Viking.SG
     date:
       min_calbp: 800
-      max_calbp: 1200
+      max_calbp: 1300
 min_coverage: 0.3
