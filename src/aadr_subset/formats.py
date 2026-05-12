@@ -1,21 +1,50 @@
 """Output writers.
 
-Day 2 ships `write_ids` for the default `--format=ids` form. TSV + JSON
-writers land on Day 4. The atomic-write helper (tempfile + rename +
-fcntl.flock) is wired here from the start since `--format=ids` already
-produces user-facing files and the atomicity contract should hold from
-Day 2 forward — same code path will serve TSV/JSON later.
+Day 2 shipped `write_ids` + atomic_write; Day 4 adds `write_tsv`,
+`write_json`, and the `write_select_output` dispatcher.
+
+JSON output key order is fixed (LLD §3.5 pin) for diff-friendliness:
+1. genetic_ids
+2. n_matched
+3. per_population_counts
+4. per_branch_counts
+5. excluded_counts
+6. matched_criteria  ← OMITTED ENTIRELY when empty
+7. warnings
+8. selector_signature
+9. selector_file
+10. anno_file
+11. anno_version
+12. schema_class
+13. coverage_column
+14. aadr_subset_version
+15. aadr_resolve_version
+16. schema_version
 """
 
 from __future__ import annotations
 
+import csv
 import fcntl
+import io
+import json
 import os
 import sys
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from . import __version__
 from .errors import IOFailure
+from .types import OutputFormat, SubsetResult
+
+if TYPE_CHECKING:
+    from aadr_resolve import AnnoFrame
+
+# JSON output schema_version; HLD §Output JSON. Increment only on
+# breaking changes to the JSON shape (additive new keys are non-breaking).
+JSON_SCHEMA_VERSION = 1
 
 
 def write_ids(genetic_ids: list[str], out_path: Path | None) -> None:
@@ -98,4 +127,175 @@ def atomic_write(path: Path, content: bytes | str) -> None:
         raise IOFailure(f"failed to write {path}: {e}") from e
 
 
-__all__ = ["atomic_write", "write_ids"]
+def write_select_output(
+    result: SubsetResult,
+    anno: AnnoFrame,
+    *,
+    fmt: OutputFormat,
+    out_path: Path | None,
+    include_matched_criteria: bool,
+) -> None:
+    """Dispatch to write_ids / write_tsv / write_json based on fmt.
+
+    out_path=None writes to stdout (no atomicity contract).
+    out_path set: atomic_write per LLD §3.5.
+    """
+    if fmt == OutputFormat.IDS:
+        write_ids(result.genetic_ids, out_path)
+    elif fmt == OutputFormat.TSV:
+        write_tsv(result, anno, out_path)
+    elif fmt == OutputFormat.JSON:
+        write_json(
+            result,
+            anno,
+            include_matched_criteria=include_matched_criteria,
+            out_path=out_path,
+        )
+    else:
+        # OutputFormat is a closed enum; this branch is unreachable.
+        raise InvariantViolation(f"unknown output format: {fmt!r}")
+
+
+def write_tsv(result: SubsetResult, anno: AnnoFrame, out_path: Path | None) -> None:
+    """Tab-separated with header row.
+
+    Columns (HLD §TSV format):
+    genetic_id, individual_id, group_id, date_calbp, coverage, matched_criteria
+
+    Cell formatting:
+    - date_calbp: integer when present; empty cell for <NA>.
+    - coverage: plain float (e.g., 1.2) when present; empty for NaN.
+      No 'x' suffix — downstream parsers consume the column as numeric.
+    - matched_criteria: semicolon-joined; empty cell when
+      result.matched_criteria doesn't carry an entry for this GID (the
+      common case when include_matched_criteria=False).
+
+    Rows iterate result.genetic_ids in order (preserves .anno row order
+    per HLD §Selector overlap and deduplication).
+    """
+    # Build a row-index lookup once: GeneticID → row position in af.
+    # Using pandas Index.get_loc per GID is fine for the typical
+    # selection size (~100-5000); not worth optimizing to a merge.
+    gid_to_row: dict[str, int] = {gid: idx for idx, gid in enumerate(anno.genetic_id.tolist())}
+
+    iid_col = anno.individual_id.tolist()
+    grp_col = anno.group_id.tolist()
+    date_col = anno.date_calbp
+    cov_col = anno.coverage
+
+    buf = io.StringIO()
+    # excel-tab dialect provides tab delimiter; we override quoting to NONE
+    # since AADR Group_IDs / IIDs don't contain tab characters in practice.
+    # No escapechar needed: GeneticIDs and IIDs are token-like (no whitespace).
+    writer = csv.writer(
+        buf,
+        delimiter="\t",
+        quoting=csv.QUOTE_NONE,
+        escapechar="\\",
+        lineterminator="\n",
+    )
+    writer.writerow(
+        [
+            "genetic_id",
+            "individual_id",
+            "group_id",
+            "date_calbp",
+            "coverage",
+            "matched_criteria",
+        ]
+    )
+    for gid in result.genetic_ids:
+        i = gid_to_row[gid]
+        date_val = date_col.iloc[i]
+        date_cell = "" if _is_na(date_val) else str(int(date_val))
+        cov_val = cov_col.iloc[i]
+        cov_cell = "" if _is_na(cov_val) else f"{float(cov_val):g}"
+        criteria = result.matched_criteria.get(gid, [])
+        criteria_cell = ";".join(criteria)
+        writer.writerow([gid, iid_col[i], grp_col[i], date_cell, cov_cell, criteria_cell])
+
+    content = buf.getvalue()
+    if out_path is None:
+        sys.stdout.write(content)
+        sys.stdout.flush()
+        return
+    atomic_write(out_path, content)
+
+
+def write_json(
+    result: SubsetResult,
+    anno: AnnoFrame,
+    *,
+    include_matched_criteria: bool,
+    out_path: Path | None,
+) -> None:
+    """Full SubsetResult-shape JSON per HLD §Output JSON.
+
+    Key order pinned at 16 entries (insertion-order via
+    json.dumps(sort_keys=False)); see module docstring.
+
+    matched_criteria omission rule: when the dict is empty (the
+    --include-matched-criteria=False default case), the key is OMITTED
+    from JSON output entirely. When non-empty, it's serialized normally.
+    """
+    try:
+        import aadr_resolve
+
+        aadr_resolve_version = getattr(aadr_resolve, "__version__", "unknown")
+    except ImportError:
+        aadr_resolve_version = "not-installed"
+
+    out: dict[str, object] = {}
+    out["genetic_ids"] = list(result.genetic_ids)
+    out["n_matched"] = result.n_matched
+    out["per_population_counts"] = dict(result.per_population_counts)
+    out["per_branch_counts"] = dict(result.per_branch_counts)
+    out["excluded_counts"] = [asdict(ec) for ec in result.excluded_counts]
+
+    if include_matched_criteria and result.matched_criteria:
+        out["matched_criteria"] = {gid: list(crit) for gid, crit in result.matched_criteria.items()}
+    # else: key omitted entirely per HLD H6 / LLD §3.5 pin.
+
+    out["warnings"] = asdict(result.warnings)
+    out["selector_signature"] = result.selector_signature
+    out["selector_file"] = result.selector_file
+    out["anno_file"] = result.anno_file
+    out["anno_version"] = result.anno_version
+    out["schema_class"] = result.schema_class
+    out["coverage_column"] = result.coverage_column_used
+    out["aadr_subset_version"] = __version__
+    out["aadr_resolve_version"] = aadr_resolve_version
+    out["schema_version"] = JSON_SCHEMA_VERSION
+
+    body = json.dumps(out, indent=2, ensure_ascii=False, sort_keys=False) + "\n"
+    if out_path is None:
+        sys.stdout.write(body)
+        sys.stdout.flush()
+        return
+    atomic_write(out_path, body)
+
+
+def _is_na(value: object) -> bool:
+    """True for pandas NA / NaN / None. Handles both Int64-nullable and
+    Float64 dtypes plus plain None."""
+    if value is None:
+        return True
+    import pandas as pd
+
+    try:
+        return bool(pd.isna(value))  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return False
+
+
+# Late import to avoid a cycle at module-load time; InvariantViolation
+# is used only inside write_select_output's "unknown format" fallback.
+from .errors import InvariantViolation  # noqa: E402
+
+__all__ = [
+    "atomic_write",
+    "write_ids",
+    "write_json",
+    "write_select_output",
+    "write_tsv",
+]

@@ -300,3 +300,69 @@ def test_select_v62_without_coverage_no_warning(tmp_path: Path, v62_anno: Path) 
     result = _run_cli("select", str(selector), str(v62_anno), "-o", str(out))
     assert result.returncode == 0, result.stderr
     assert "no native coverage" not in result.stderr
+
+
+# --- Day 4: --format TSV + JSON ---
+
+
+def test_select_format_tsv(tmp_path: Path, v66_anno: Path) -> None:
+    """--format=tsv writes the 6-column TSV with header."""
+    selector = tmp_path / "western.yaml"
+    selector.write_text("populations: [Western_HG]\n", encoding="utf-8")
+    out = tmp_path / "out.tsv"
+    result = _run_cli("select", str(selector), str(v66_anno), "--format", "tsv", "-o", str(out))
+    assert result.returncode == 0, result.stderr
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert lines[0].startswith("genetic_id\tindividual_id\tgroup_id\t")
+    assert any("Loschbour.AG\tLoschbour\tWestern_HG" in line for line in lines[1:])
+
+
+def test_select_format_json_has_schema_version(tmp_path: Path, v66_anno: Path) -> None:
+    """--format=json output is valid JSON with schema_version: 1."""
+    import json as _json
+
+    selector = tmp_path / "western.yaml"
+    selector.write_text("populations: [Western_HG]\n", encoding="utf-8")
+    out = tmp_path / "out.json"
+    result = _run_cli("select", str(selector), str(v66_anno), "--format", "json", "-o", str(out))
+    assert result.returncode == 0, result.stderr
+    parsed = _json.loads(out.read_text(encoding="utf-8"))
+    assert parsed["schema_version"] == 1
+    assert parsed["genetic_ids"] == ["Loschbour.AG", "Loschbour.DG", "Bichon"]
+    assert parsed["n_matched"] == 3
+    # matched_criteria OMITTED by default.
+    assert "matched_criteria" not in parsed
+
+
+def test_select_format_json_include_matched_criteria(tmp_path: Path, v66_anno: Path) -> None:
+    """--include-matched-criteria + --format=json → matched_criteria key present."""
+    import json as _json
+
+    selector = tmp_path / "western.yaml"
+    selector.write_text("populations: [Western_HG]\n", encoding="utf-8")
+    out = tmp_path / "out.json"
+    result = _run_cli(
+        "select",
+        str(selector),
+        str(v66_anno),
+        "--format",
+        "json",
+        "--include-matched-criteria",
+        "-o",
+        str(out),
+    )
+    assert result.returncode == 0, result.stderr
+    parsed = _json.loads(out.read_text(encoding="utf-8"))
+    assert "matched_criteria" in parsed
+    assert all("populations:Western_HG" in v for v in parsed["matched_criteria"].values())
+
+
+def test_select_format_tsv_to_stdout(tmp_path: Path, v66_anno: Path) -> None:
+    """--format=tsv with no -o → TSV on stdout; summary on stderr."""
+    selector = tmp_path / "western.yaml"
+    selector.write_text("populations: [Western_HG]\n", encoding="utf-8")
+    result = _run_cli("select", str(selector), str(v66_anno), "--format", "tsv")
+    assert result.returncode == 0
+    assert result.stdout.startswith("genetic_id\t")
+    assert "Loschbour.AG\tLoschbour\tWestern_HG" in result.stdout
+    assert "Matched 3 samples" in result.stderr

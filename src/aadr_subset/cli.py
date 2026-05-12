@@ -15,6 +15,7 @@ import sys
 import click
 
 from . import __version__
+from .commands.inspect_cmd import run_inspect
 from .commands.select_cmd import run_select
 from .commands.validate_cmd import run_validate
 from .errors import EXIT_UNEXPECTED, AadrSubsetError, UsageError
@@ -72,6 +73,16 @@ def validate_command(ctx: click.Context, selector_path: str) -> None:
     help="Output file path (default: stdout).",
 )
 @click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["ids", "tsv", "json"]),
+    default="ids",
+    show_default=True,
+    help="Output format. `ids`=newline-delimited GeneticIDs; `tsv`=TSV with "
+    "genetic_id/individual_id/group_id/date_calbp/coverage/matched_criteria; "
+    "`json`=structured SubsetResult.",
+)
+@click.option(
     "--schema-override",
     type=click.Choice(["A", "B", "C", "D", "E"]),
     default=None,
@@ -99,25 +110,73 @@ def select_command(
     selector_path: str,
     anno_path: str,
     out: str | None,
+    fmt: str,
     schema_override: str | None,
     allow_empty: bool,
     allow_empty_source: bool,
     include_matched_criteria: bool,
 ) -> None:
-    """Materialize a selector against a target AADR .anno; emit sample IDs.
+    """Materialize a selector against a target AADR .anno; emit sample IDs / TSV / JSON.
 
-    Day-2 surface: populations + individual_ids predicates only.
-    Output: --format=ids (default; only format in Day 2).
+    Day-3 surface: populations + individual_ids + date + modern_only +
+    min_coverage + any:/exclude: combinators against a single .anno.
+    Day-4 adds TSV + JSON output formats.
+
     Cross-version (--source-anno + selector.resolve_to_version) lands Day 6.
     """
     exit_code = run_select(
         selector_path=selector_path,
         anno_path=anno_path,
         out=out,
+        fmt=fmt,
         schema_override=schema_override,
         allow_empty=allow_empty,
         allow_empty_source=allow_empty_source,
         include_matched_criteria=include_matched_criteria,
+        quiet=ctx.obj["quiet"],
+    )
+    sys.exit(exit_code)
+
+
+@cli.command("inspect")
+@click.argument("selector_path", type=click.STRING)
+@click.argument("anno_path", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--schema-override",
+    type=click.Choice(["A", "B", "C", "D", "E"]),
+    default=None,
+    help="Force AnnoFrame schema class (A-E).",
+)
+@click.option(
+    "--allow-empty-source",
+    is_flag=True,
+    help="Allow individual_ids_source to be empty.",
+)
+@click.option(
+    "--strict-resolve",
+    is_flag=True,
+    help="Show STRICT-RESOLVE diagnostic in the summary when missing-after-"
+    "resolve IDs are present. Per HLD §Inspect mode, --strict-resolve is "
+    "accepted for diagnostic display but never changes inspect's exit code "
+    "(inspect always exits 0).",
+)
+@click.pass_context
+def inspect_command(
+    ctx: click.Context,
+    selector_path: str,
+    anno_path: str,
+    schema_override: str | None,
+    allow_empty_source: bool,
+    strict_resolve: bool,
+) -> None:
+    """Diagnostic dry-run: shows what a selector matches against a target
+    .anno without writing any output. Always exits 0 (informational)."""
+    exit_code = run_inspect(
+        selector_path=selector_path,
+        anno_path=anno_path,
+        schema_override=schema_override,
+        allow_empty_source=allow_empty_source,
+        strict_resolve=strict_resolve,
         quiet=ctx.obj["quiet"],
     )
     sys.exit(exit_code)

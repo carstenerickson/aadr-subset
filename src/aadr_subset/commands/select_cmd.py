@@ -25,9 +25,10 @@ from ..errors import (
     UsageError,
     ValidationError,
 )
-from ..formats import write_ids
+from ..formats import write_select_output
+from ..reporting import format_stdout_summary
 from ..selector import load_selector
-from ..types import Selector, SubsetResult
+from ..types import OutputFormat, Selector
 
 
 def run_select(
@@ -35,6 +36,7 @@ def run_select(
     selector_path: str,
     anno_path: str,
     out: str | None,
+    fmt: str,
     schema_override: str | None,
     allow_empty: bool,
     allow_empty_source: bool,
@@ -118,15 +120,22 @@ def run_select(
         # coverage_column_used lands Day 3 with the coverage filter.
     )
 
-    # 6. Write output.
+    # 6. Write output (TSV / JSON / IDs via formats.py dispatcher).
+    fmt_enum = OutputFormat(fmt)
     t_write_start = time.monotonic()
-    write_ids(result.genetic_ids, Path(out) if out else None)
+    write_select_output(
+        result,
+        anno,
+        fmt=fmt_enum,
+        out_path=Path(out) if out else None,
+        include_matched_criteria=include_matched_criteria,
+    )
     write_time = time.monotonic() - t_write_start
 
-    # 7. Stdout summary (to stderr; ID list goes to stdout when out is None).
+    # 7. Stdout summary (to stderr; output goes to stdout when out is None).
     if not quiet:
         sys.stderr.write(
-            _format_stdout_summary(
+            format_stdout_summary(
                 result,
                 anno=anno,
                 parse_time=parse_time,
@@ -189,42 +198,3 @@ def _parse_schema_override(value: str | None):  # type: ignore[no-untyped-def]
                 )
             ],
         ) from e
-
-
-def _format_stdout_summary(
-    result: SubsetResult,
-    *,
-    anno: aadr_resolve.AnnoFrame,
-    parse_time: float,
-    eval_time: float,
-    write_time: float,
-    out_path_str: str | None,
-    selector_file: str,
-) -> str:
-    """Day-2 minimal stdout summary. Full inline-vs-columnar formatting
-    lands Day 4 (per HLD §Stdout summary)."""
-    pop_count = len(result.per_population_counts)
-    lines = [
-        f"Selector: {selector_file}",
-        f".anno:    {anno.path} ({anno.version}, class {anno.schema_class.value})",
-        "",
-        f"Matched {result.n_matched} samples across {pop_count} populations.",
-    ]
-    if pop_count > 0:
-        # Compact-inline form regardless of population count for Day 2;
-        # columnar-vs-inline distinction lands Day 4.
-        pop_str = ", ".join(
-            f"{name}={cnt}" for name, cnt in list(result.per_population_counts.items())[:10]
-        )
-        if pop_count > 10:
-            pop_str += f", ... (+{pop_count - 10} more)"
-        lines.append(f"Per-population: {pop_str}")
-    lines.append("")
-    out_label = out_path_str if out_path_str else "stdout"
-    lines.append(f"Wrote {out_label} ({result.n_matched} lines)")
-    total = parse_time + eval_time + write_time
-    lines.append(
-        f"Done in {total:.2f}s "
-        f"(parse {parse_time:.2f}s, eval {eval_time:.2f}s, write {write_time:.2f}s)."
-    )
-    return "\n".join(lines)

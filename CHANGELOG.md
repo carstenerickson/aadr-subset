@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Day 4 — inspect mode + tsv/json output formats + stdout summary)
+
+Output surface filled out: `select` gains `--format tsv` / `--format json`
+alongside the Day-2 `ids`; new `inspect` subcommand prints a human-friendly
+breakdown without producing files. Stdout summary moved to a dedicated
+`reporting` module shared by both commands.
+
+- **`formats.write_tsv`** — 6-column TSV (`genetic_id`, `individual_id`,
+  `group_id`, `date_calbp`, `coverage`, `matched_criteria`) with header
+  row. Empty cells for `<NA>` date / NaN coverage. Coverage rendered as
+  plain float (`{:g}`) — no `x` suffix, so downstream parsers can read
+  the column as numeric. `matched_criteria` cell is semicolon-joined; an
+  empty string when `--include-matched-criteria` is off (the default).
+  CSV writer uses `csv.QUOTE_NONE` since AADR Group_IDs / IIDs don't
+  contain tab characters in practice.
+- **`formats.write_json`** — full `SubsetResult`-shape JSON with the
+  16-key insertion order pinned per LLD §3.5 (HLD §Output JSON).
+  `matched_criteria` is **omitted entirely** when empty (the
+  `--include-matched-criteria=False` default), reducing the key count
+  to 15. `aadr_resolve_version` resolved at write time via
+  `getattr(aadr_resolve, "__version__", "unknown")` so the artifact
+  records the exact resolver pinned at run time. `schema_version: 1`
+  always present; only bumped on breaking JSON shape changes (additive
+  new keys are non-breaking).
+- **`formats.write_select_output`** dispatcher routes by `OutputFormat`
+  enum; `out_path=None` → stdout (no atomicity contract); `out_path`
+  set → `atomic_write` per LLD §3.5.
+- **`reporting.format_stdout_summary`** — multi-line stderr summary
+  shared by `select`. Inline form for <10 populations
+  (`Per-population: A=187, B=34, ...`); columnar form ≥10. Timing
+  breakdown (parse / eval / write / total). Header includes selector
+  signature (short form `sha256:abcdefg...hijklmn`) when populated;
+  Day-2 / Day-3 results have empty signature so the line is omitted.
+- **`reporting.format_inspect_summary`** — always-columnar layout for
+  the inspect subcommand. Sections: per-population, branch
+  contributions, exclusions, date range + coverage range over matched
+  rows. No timing block — inspect's purpose is debugging the selector.
+- **`commands/inspect_cmd.run_inspect`** — wraps `engine.select_samples`
+  with `include_matched_criteria=True` so the per-row criteria are
+  available even though inspect doesn't emit them per-row. Always
+  returns `EXIT_SUCCESS`, even on zero matches (inspect is diagnostic;
+  zero matches is itself useful information). `--strict-resolve`
+  surfaces a diagnostic line but never changes the exit code.
+- **CLI surface**: `select --format {ids,tsv,json}` (default `ids`);
+  new `inspect SELECTOR ANNO` subcommand with `--schema-override`,
+  `--allow-empty-source`, `--strict-resolve`.
+
 ### Added (Day 3 — any:/exclude: combinators + date/modern_only/min_coverage)
 
 Selector evaluation algorithm wired end-to-end (HLD §Selector evaluation
