@@ -177,7 +177,7 @@ def _resolve_cross_version_inputs(
     *,
     source_anno: str | None,
     target_anno: aadr_resolve.AnnoFrame,
-    schema_override_enum: "aadr_resolve.types.SchemaClass | None",
+    schema_override_enum: aadr_resolve.types.SchemaClass | None,
 ) -> aadr_resolve.AnnoFrame | None:
     """Validate cross-version flag/selector combinations + load source .anno
     when both are present. Returns the source AnnoFrame or None.
