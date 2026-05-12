@@ -15,8 +15,10 @@ import sys
 import click
 
 from . import __version__
+from .commands.select_cmd import run_select
 from .commands.validate_cmd import run_validate
-from .errors import EXIT_UNEXPECTED, AadrSubsetError
+from .errors import EXIT_UNEXPECTED, AadrSubsetError, UsageError
+from .selector import format_validation_errors
 
 
 def _version_message() -> str:
@@ -59,6 +61,68 @@ def validate_command(ctx: click.Context, selector_path: str) -> None:
     sys.exit(exit_code)
 
 
+@cli.command("select")
+@click.argument("selector_path", type=click.STRING)
+@click.argument("anno_path", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "-o",
+    "--out",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Output file path (default: stdout).",
+)
+@click.option(
+    "--schema-override",
+    type=click.Choice(["A", "B", "C", "D", "E"]),
+    default=None,
+    help="Force AnnoFrame schema class (A-E). Use when .anno is renamed but "
+    "matches an existing class signature.",
+)
+@click.option(
+    "--allow-empty",
+    is_flag=True,
+    help="Downgrade zero-match exit 1 to exit 0 (write an empty output file).",
+)
+@click.option(
+    "--allow-empty-source",
+    is_flag=True,
+    help="Allow individual_ids_source to be empty (exits 0 instead of 1).",
+)
+@click.option(
+    "--include-matched-criteria",
+    is_flag=True,
+    help="Include per-sample matched_criteria in JSON output (off by default).",
+)
+@click.pass_context
+def select_command(
+    ctx: click.Context,
+    selector_path: str,
+    anno_path: str,
+    out: str | None,
+    schema_override: str | None,
+    allow_empty: bool,
+    allow_empty_source: bool,
+    include_matched_criteria: bool,
+) -> None:
+    """Materialize a selector against a target AADR .anno; emit sample IDs.
+
+    Day-2 surface: populations + individual_ids predicates only.
+    Output: --format=ids (default; only format in Day 2).
+    Cross-version (--source-anno + selector.resolve_to_version) lands Day 6.
+    """
+    exit_code = run_select(
+        selector_path=selector_path,
+        anno_path=anno_path,
+        out=out,
+        schema_override=schema_override,
+        allow_empty=allow_empty,
+        allow_empty_source=allow_empty_source,
+        include_matched_criteria=include_matched_criteria,
+        quiet=ctx.obj["quiet"],
+    )
+    sys.exit(exit_code)
+
+
 def main() -> None:
     """Top-level entry point. Maps AadrSubsetError subclasses to exit codes;
     uncaught exceptions exit 70 (BSD EX_SOFTWARE)."""
@@ -72,8 +136,16 @@ def main() -> None:
     except click.exceptions.Abort:
         # ctrl-C, etc. → exit 130 (conventional SIGINT exit code).
         sys.exit(130)
+    except UsageError as e:
+        # UsageError may carry a list[ValidationError] payload (from
+        # selector load) or a plain message (from engine feature-gate).
+        if e.errors:
+            sys.stderr.write(format_validation_errors(e.errors) + "\n")
+        elif str(e):
+            sys.stderr.write(f"{e}\n")
+        sys.exit(e.exit_code)
     except AadrSubsetError as e:
-        # Tool-internal errors carry exit_code.
+        # Other tool-internal errors carry exit_code.
         if str(e):
             sys.stderr.write(f"{e}\n")
         sys.exit(e.exit_code)
