@@ -1,0 +1,27 @@
+# Western Steppe Herder (WSH) pool starter template.
+#
+# STARTING POINT — audit Group_IDs against your target .anno before use.
+tested_against: [v66.0]
+last_verified: '2026-05-12'
+maintainer: aadr-subset
+notes: |
+  Source pool for "WSH" ancestry in qpAdm-style modeling. Yamnaya
+  (Samara), Poltavka, and closely related Eneolithic steppe groups.
+  Useful as a distal source population. The `any:` block lets you
+  mix groups whose date ranges differ slightly without imposing a
+  single tight window.
+---
+any:
+  - populations: [Yamnaya_Samara, Yamnaya_Kalmykia]
+    date:
+      min_calbp: 4500
+      max_calbp: 5500
+  - populations: [Poltavka]
+    date:
+      min_calbp: 4000
+      max_calbp: 5000
+  - populations: [Eneolithic_steppe]
+    date:
+      min_calbp: 5000
+      max_calbp: 7000
+min_coverage: 0.3

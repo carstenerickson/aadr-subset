@@ -1,0 +1,25 @@
+# Bronze Age Europe starter template (~5000-2700 calBP).
+#
+# STARTING POINT — audit Group_IDs against your target .anno before use.
+tested_against: [v66.0]
+last_verified: '2026-05-12'
+maintainer: aadr-subset
+notes: |
+  Pan-European Bronze Age cohort spanning Early-Late Bronze Age culturally
+  distinct labels (Bell Beaker, Corded Ware, Unetice). Date range covers
+  the conventional EBA-to-LBA span. Adjust populations to the specific
+  cultural horizon you care about; this is a wide tent useful for PCA
+  context but not for tight ancestry questions.
+---
+date:
+  min_calbp: 2700
+  max_calbp: 5000
+populations:
+  - Bell_Beaker_Britain
+  - Bell_Beaker_Central_Europe
+  - Bell_Beaker_Iberia
+  - Corded_Ware_Germany
+  - Corded_Ware_Poland
+  - Unetice_Czech
+  - Yamnaya_Samara
+min_coverage: 0.3

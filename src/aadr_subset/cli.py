@@ -18,6 +18,7 @@ from . import __version__
 from .commands.inspect_cmd import run_inspect
 from .commands.report_cmd import run_report
 from .commands.select_cmd import run_select
+from .commands.template_cmd import run_template
 from .commands.validate_cmd import run_validate
 from .errors import EXIT_UNEXPECTED, AadrSubsetError, UsageError
 from .selector import format_validation_errors
@@ -295,6 +296,27 @@ def report_command(
         include_empty_groups=include_empty_groups,
         quiet=ctx.obj["quiet"],
     )
+    sys.exit(exit_code)
+
+
+@cli.command("template")
+@click.argument("name", required=False, default=None, type=click.STRING)
+@click.option(
+    "-o",
+    "--out",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Output file path for emit mode (default: stdout).",
+)
+@click.pass_context
+def template_command(ctx: click.Context, name: str | None, out: str | None) -> None:
+    """Discover or emit a shipped selector template.
+
+    No-argument form: prints the sorted list of shipped templates to
+    stdout. Argument form: emits `<name>.yaml`'s verbatim content
+    (including its metadata block and comments) to stdout or --out PATH.
+    Unknown names exit 2 with a discovery hint."""
+    exit_code = run_template(name=name, out=out, quiet=ctx.obj["quiet"])
     sys.exit(exit_code)
 
 

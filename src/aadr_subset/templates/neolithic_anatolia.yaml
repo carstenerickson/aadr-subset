@@ -1,0 +1,21 @@
+# Neolithic Anatolia starter template (~9500-7000 calBP).
+#
+# STARTING POINT — audit Group_IDs against your target .anno before use.
+tested_against: [v66.0]
+last_verified: '2026-05-12'
+maintainer: aadr-subset
+notes: |
+  Early Neolithic Anatolian farmers — proximal source for the EEF
+  (Early European Farmer) component that spread westward starting
+  ~8500 calBP. Useful as a source population for qpAdm-style
+  Anatolian-derived ancestry tests.
+---
+populations:
+  - Anatolia_N
+  - Anatolia_ChL
+  - Tepecik_Ciftlik_N
+  - Barcin_N
+date:
+  min_calbp: 7000
+  max_calbp: 9500
+min_coverage: 0.3

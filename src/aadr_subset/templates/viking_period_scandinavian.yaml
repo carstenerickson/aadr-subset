@@ -1,0 +1,23 @@
+# Viking-period Scandinavian starter template (~1200-800 calBP / 750-1150 CE).
+#
+# STARTING POINT — audit Group_IDs against your target .anno before use.
+tested_against: [v66.0]
+last_verified: '2026-05-12'
+maintainer: aadr-subset
+notes: |
+  Viking Age Scandinavian samples — Norway, Sweden, Denmark, plus
+  Norse-settled Iceland and the British Isles. Date range brackets the
+  conventional Viking Age (793 CE Lindisfarne to ~1100 CE). Population
+  labels in AADR cluster by modern country + Viking_Age qualifier; check
+  your .anno for the exact suffix convention.
+---
+any:
+  - populations: [Norway.VA, Sweden.VA, Denmark.VA]
+    date:
+      min_calbp: 800
+      max_calbp: 1200
+  - populations: [Iceland.VA, England.VA, Ireland.VA]
+    date:
+      min_calbp: 800
+      max_calbp: 1200
+min_coverage: 0.3

@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Day 8 — template subcommand + 6 starter templates)
+
+`aadr-subset template` ships as the discovery aid for new users —
+no-arg form lists the bundled starting points, name-arg form emits
+the verbatim YAML (comments + metadata block preserved) to stdout or
+a file. Six starter templates ship under `aadr_subset/templates/`.
+
+- **`templates.py`** — discovery API per LLD §3.7:
+  - `list_templates()` returns sorted basenames (no `.yaml`). Discovery
+    is by directory listing only; no manifest file, so adding a new
+    template is a one-file PR.
+  - `load_template(name)` parses via `selector.load_selector`, returning
+    `(metadata, selector)`. Unknown name → `IOFailure` with a discovery
+    hint listing the shipped names.
+  - `emit_template(name, out)` writes the raw bytes — no YAML
+    round-trip. The pin: round-tripping through ruamel.yaml is lossy
+    for edge cases (block-scalar vs literal-scalar, anchor/alias
+    preservation). Byte-verbatim emit guarantees users editing a
+    saved template start from the same baseline aadr-subset ships.
+  - `.yaml` only — `.yml` rejected for consistency.
+- **`commands/template_cmd.run_template`** — list mode when `name=None`
+  (sorted names to stdout, one per line); emit mode otherwise (verbatim
+  YAML to stdout or `--out PATH` via `atomic_write`). Unknown name
+  bubbles up the `IOFailure` from `_template_path` → exit 2.
+- **CLI**: new `template [NAME] [-o PATH]` subcommand.
+- **Six starter templates** under `aadr_subset/templates/` —
+  `modern_european`, `iron_age_britain`, `bronze_age_europe`,
+  `wsh_steppe_pool`, `neolithic_anatolia`,
+  `viking_period_scandinavian`. Each is a two-document YAML with a
+  metadata block (`tested_against`, `last_verified`, `maintainer`,
+  `notes:`) and a working selector body. Templates are STARTING POINTS
+  — Group_ID labels in the .anno corpus drift across releases, so the
+  notes section warns users to audit against their actual target
+  before production use.
+- **Parametrized "every shipped template loads cleanly" test** — a
+  guard that catches a malformed addition at PR time. Each shipped
+  template must (a) parse through `load_selector` without
+  `UsageError`, (b) carry `tested_against` metadata, (c) have a
+  non-empty selector body.
+
 ### Added (Day 7 — --coverage-column / --coverage-derive flags)
 
 Closes out the last HLD v0.1 selector key. `min_coverage` filters now

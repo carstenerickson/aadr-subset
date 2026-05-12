@@ -1,0 +1,29 @@
+# Modern European populations starter template.
+#
+# This is a STARTING POINT, not a verified cohort. Audit the Group_IDs
+# against your target .anno file (e.g. `aadr-subset inspect ... | head`
+# to see per-population counts), then edit + extend as needed.
+tested_against: [v66.0]
+last_verified: '2026-05-12'
+maintainer: aadr-subset
+notes: |
+  Modern (post-1880 CE) Europe-broad selector. `modern_only: true` is the
+  shorthand for date_calbp <= 70 (HLD §Modern vs ancient detection).
+  AADR Group_IDs follow the .SG (shotgun) / .DG (Reich-lab) / .AG
+  (Allentoft-style aDNA) suffix convention in v66+; modern samples typically
+  carry .SG. Adjust the literal list to match what you actually find in
+  your .anno (population labels drift across releases — drop suffixes if
+  you're matching v62.0 instead of v66.0).
+---
+modern_only: true
+populations:
+  - English.SG
+  - Irish.SG
+  - French.SG
+  - German.SG
+  - Italian_North.SG
+  - Italian_South.SG
+  - Spanish.SG
+  - Norwegian.SG
+  - Swedish.SG
+  - Finnish.SG

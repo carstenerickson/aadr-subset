@@ -1,0 +1,23 @@
+# Iron Age Britain starter template (~2400-1900 calBP / ~450 BCE - 50 CE).
+#
+# STARTING POINT — audit Group_IDs against your target .anno before
+# using in production.
+tested_against: [v66.0]
+last_verified: '2026-05-12'
+maintainer: aadr-subset
+notes: |
+  Iron Age British Isles cohort. AADR Group_ID labels for this period
+  include England.IA, Scotland.IA, Wales.IA (and Ireland.IA where present).
+  The date range below brackets the British La Tène / Roman conquest era;
+  tighten to e.g. 2400-2000 to exclude post-conquest samples if you want
+  pre-Roman strictly. Minimum coverage 0.3x is conservative; AADR's
+  default panel typically holds at 1240k.
+---
+populations:
+  - England.IA
+  - Scotland.IA
+  - Wales.IA
+date:
+  min_calbp: 1900
+  max_calbp: 2400
+min_coverage: 0.3
