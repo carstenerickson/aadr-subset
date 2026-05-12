@@ -106,22 +106,6 @@ def test_select_zero_match_with_allow_empty(tmp_path: Path, v66_anno: Path) -> N
     assert out.read_text(encoding="utf-8") == ""
 
 
-def test_select_unsupported_feature_exits_4(tmp_path: Path, v66_anno: Path) -> None:
-    """Features still in the feature gate (coverage_column as of Day 3,
-    cross-version Day-6-pending) → exit 4 with constraint=feature_not_implemented."""
-    selector = tmp_path / "covcol.yaml"
-    selector.write_text(
-        "populations: [Western_HG]\ncoverage_column: snps_hit_1240k\n",
-        encoding="utf-8",
-    )
-    out = tmp_path / "out.ids"
-
-    result = _run_cli("select", str(selector), str(v66_anno), "-o", str(out))
-    assert result.returncode == 4
-    assert "not yet implemented" in result.stderr
-    assert "feature_not_implemented" in result.stderr
-
-
 def test_select_quiet_no_summary(tmp_path: Path, v66_anno: Path) -> None:
     """--quiet suppresses the stderr summary block."""
     selector = tmp_path / "ko1.yaml"
@@ -253,19 +237,6 @@ def test_select_complex_and_or_not(tmp_path: Path, v66_anno: Path) -> None:
     # exclude Bichon individual: drops Bichon-row.
     # Final: Losch.AG, Losch.DG, KO1.
     assert ids == ["Loschbour.AG", "Loschbour.DG", "KO1"]
-
-
-def test_select_unsupported_coverage_column_still_blocked(tmp_path: Path, v66_anno: Path) -> None:
-    """coverage_column: still in Day-3 feature gate pending CLI flag."""
-    selector = tmp_path / "cc.yaml"
-    selector.write_text(
-        "populations: [Western_HG]\ncoverage_column: snps_hit_1240k\n",
-        encoding="utf-8",
-    )
-    result = _run_cli("select", str(selector), str(v66_anno))
-    assert result.returncode == 4
-    assert "feature_not_implemented" in result.stderr
-    assert "coverage_column" in result.stderr
 
 
 # --- v62 class-D coverage warning (HLD §Coverage handling) ---

@@ -1,17 +1,17 @@
 """Selector evaluation engine.
 
-Day 6 scope: full predicate set + cross-version IID lift via aadr-resolve.
+Day 7 scope: full HLD v0.1 engine surface.
 
 - populations / individual_ids / individual_ids_source (Day 2)
 - modern_only / date.min_calbp / date.max_calbp / min_coverage (Day 3)
 - any: OR-block + exclude: NOT-of-OR block (Day 3)
 - cross-version (source_version + resolve_to_version + --source-anno +
   --mid-bridge + --strict-resolve) — Day 6
+- coverage_column override via selector + CLI --coverage-column /
+  --coverage-derive (Day 7). Per-branch coverage_column wins inside
+  the branch.
 
-Feature gate still rejects:
-- coverage_column: (landed as a selector grammar key but the
-  AnnoFrame.coverage_via() override isn't wired through yet; lands
-  with the --coverage-column / --coverage-derive CLI flags)
+Feature gate is now empty.
 
 Per LLD §3.4 evaluation algorithm.
 """
@@ -24,7 +24,11 @@ import aadr_resolve
 import pandas as pd
 from aadr_resolve import AnnoFrame
 
-from .errors import InvariantViolation, SoftValidationFailure, UsageError, ValidationError
+from .errors import (
+    InvariantViolation,
+    IOFailure,
+    SoftValidationFailure,
+)
 from .types import (
     AnyBranch,
     DateRange,
@@ -47,6 +51,7 @@ def select_samples(
     source_anno: AnnoFrame | None = None,
     mid_bridge: Path | None = None,
     strict_resolve: bool = False,
+    coverage_column: str | None = None,
     include_matched_criteria: bool = False,
 ) -> SubsetResult:
     """Evaluate selector against AnnoFrame; return SubsetResult.
@@ -65,14 +70,15 @@ def select_samples(
     6. Compute per_population_counts, per_branch_counts.
 
     Raises:
-        UsageError: a feature still in the gate was used (currently
-            coverage_column).
         SoftValidationFailure: strict_resolve=True and at least one
             source Individual_ID failed to resolve to target.
         InvariantViolation: cross-lab MID collision detected by
             aadr-resolve, or AnnoFrame.path is None on cross-version.
     """
     _reject_unsupported_features(selector)
+
+    # Effective top-level coverage_column: selector wins over CLI.
+    top_effective_cov_col = selector.coverage_column or coverage_column
 
     # 0. Cross-version IID lift. When resolve_to_version is set, the
     # selector's individual_ids (YAML + source-file union) are SOURCE IIDs;
@@ -118,11 +124,16 @@ def select_samples(
         modern_only=selector.modern_only,
         min_coverage=selector.min_coverage,
         date=selector.date,
+        coverage_column=top_effective_cov_col,
     )
 
     # 2. any: OR mask. Computed even when no any: block so we can attribute
-    # counts; an absent any: yields all-True (does not filter).
-    any_or_mask, branch_masks = _build_any_or_mask(anno, selector.any_branches)
+    # counts; an absent any: yields all-True (does not filter). Each branch
+    # gets the top-level effective coverage_column as its fallback; branch-
+    # level coverage_column overrides for that branch only.
+    any_or_mask, branch_masks = _build_any_or_mask(
+        anno, selector.any_branches, top_coverage_column=top_effective_cov_col
+    )
 
     # 3. exclude: NOT-of-OR mask.
     exclude_keep_mask = _build_exclude_mask(anno, selector.exclude)
@@ -181,6 +192,7 @@ def _build_predicate_mask(
     modern_only: bool | None,
     min_coverage: float | None,
     date: DateRange | None,
+    coverage_column: str | None = None,
 ) -> pd.Series:
     """Build a boolean Series by AND-combining per-key sub-masks. Each
     sub-mask is constructed only when its key is non-empty/non-None.
@@ -192,7 +204,9 @@ def _build_predicate_mask(
     - populations: af.group_id.isin(populations)
     - individual_ids: af.individual_id.isin(individual_ids)
     - modern_only=True: af.date_calbp <= 70 (NaN/<NA> dates FAIL)
-    - min_coverage=F: af.coverage >= F (NaN coverage FAILS)
+    - min_coverage=F: af.coverage >= F (NaN coverage FAILS).
+      When coverage_column is set, af.coverage_via(coverage_column) is
+      consulted instead. MissingNativeFieldError → IOFailure.
     - date.min_calbp=N: af.date_calbp >= N (<NA> dates FAIL)
     - date.max_calbp=N: af.date_calbp <= N (<NA> dates FAIL)
     """
@@ -212,9 +226,9 @@ def _build_predicate_mask(
     # modern_only=False is the "no constraint" form per HLD; treat as absent.
 
     if min_coverage is not None:
-        # af.coverage is Float64 with NaN for missing. NaN comparisons
-        # are False, so NaN-coverage samples FAIL the threshold.
-        masks.append(af.coverage >= min_coverage)
+        cov_series = _coverage_series(af, coverage_column)
+        # NaN comparisons are False, so NaN-coverage samples FAIL the threshold.
+        masks.append(cov_series >= min_coverage)
 
     if date is not None:
         if date.min_calbp is not None:
@@ -233,10 +247,17 @@ def _build_predicate_mask(
 
 
 def _build_any_or_mask(
-    af: AnnoFrame, branches: list[AnyBranch]
+    af: AnnoFrame,
+    branches: list[AnyBranch],
+    *,
+    top_coverage_column: str | None = None,
 ) -> tuple[pd.Series, list[pd.Series]]:
     """For each `any:` branch, build a branch mask via _build_predicate_mask.
     Returns (or_combined_mask, per_branch_mask_list).
+
+    Per HLD §Coverage handling, the effective coverage_column for a
+    branch is `branch.coverage_column or top_coverage_column` (branch
+    wins over top-level fallback).
 
     Branches with empty filters (the schema rejects this at parse time)
     would produce all-True; relying on schema to enforce minProperties=1.
@@ -260,6 +281,7 @@ def _build_any_or_mask(
             # case surfaces. HLD calls for this support but the path
             # isn't exercised yet.
             pass
+        branch_cov_col = branch.coverage_column or top_coverage_column
         branch_masks.append(
             _build_predicate_mask(
                 af,
@@ -268,6 +290,7 @@ def _build_any_or_mask(
                 modern_only=branch.modern_only,
                 min_coverage=branch.min_coverage,
                 date=branch.date,
+                coverage_column=branch_cov_col,
             )
         )
 
@@ -401,38 +424,33 @@ def _compute_matched_criteria(
 
 
 def _reject_unsupported_features(selector: Selector) -> None:
-    """Feature gate.
-
-    Still unsupported (raised with constraint=feature_not_implemented):
-    - coverage_column: (pending --coverage-column / --coverage-derive
-      CLI flags).
+    """Feature gate. Empty as of Day 7 — full HLD v0.1 surface is wired.
+    Retained as a no-op insertion point for v0.2 grammar extensions.
     """
-    unsupported: list[str] = []
-    if selector.coverage_column is not None:
-        unsupported.append("coverage_column: (--coverage-column CLI flag pending)")
+    # Reserved for v0.2+ feature gates. Intentionally a no-op.
+    _ = selector
+    return
 
-    # Also reject coverage_column inside any: branches.
-    for i, branch in enumerate(selector.any_branches):
-        if branch.coverage_column is not None:
-            unsupported.append(f"any[{i}].coverage_column: (pending)")
 
-    if unsupported:
-        raise UsageError(
-            errors=[
-                ValidationError(
-                    file="<selector>",
-                    line=1,
-                    col=1,
-                    pointer="/",
-                    message=(
-                        f"selector uses feature(s) not yet implemented in this "
-                        f"build: {', '.join(unsupported)}. See HLD project plan "
-                        f"for the day each feature lands."
-                    ),
-                    constraint="feature_not_implemented",
-                )
-            ],
-        )
+# --- Coverage column helper ---
+
+
+def _coverage_series(af: AnnoFrame, coverage_column: str | None) -> pd.Series:
+    """Pick the right coverage Series for a min_coverage check.
+
+    None → af.coverage (native canonical column). Set → af.coverage_via(
+    coverage_column); MissingNativeFieldError mapped to IOFailure so the
+    user sees a clean exit-2 message instead of an internal traceback.
+    """
+    if coverage_column is None:
+        return af.coverage
+    try:
+        return af.coverage_via(coverage_column)
+    except aadr_resolve.MissingNativeFieldError as e:
+        raise IOFailure(
+            f"coverage column {coverage_column!r} is not available in "
+            f"{af.version} (schema class {af.schema_class.value}): {e}"
+        ) from e
 
 
 # --- Dedup helpers ---

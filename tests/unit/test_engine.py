@@ -14,10 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pandas as pd
-import pytest
 
 from aadr_subset.engine import select_samples
-from aadr_subset.errors import UsageError
 from aadr_subset.types import (
     AnyBranch,
     DateRange,
@@ -462,33 +460,4 @@ def test_complex_selector_and_or_not() -> None:
     assert result.genetic_ids == ["Loschbour.AG", "Loschbour.DG", "KO1"]
 
 
-# --- Feature gate (shrinks at Day 3) ---
-
-
-@pytest.mark.parametrize(
-    "selector_kwargs",
-    [
-        {"coverage_column": "snps_hit_1240k"},
-    ],
-)
-def test_unsupported_features_rejected(selector_kwargs: dict[str, object]) -> None:
-    """Engine rejects features that haven't landed yet. As of Day 6 the
-    list is down to coverage_column (pending --coverage-column /
-    --coverage-derive CLI flags)."""
-    af = make_fake_af()
-    sel = Selector(**selector_kwargs)  # type: ignore[arg-type]
-    with pytest.raises(UsageError) as excinfo:
-        select_samples(af, sel)  # type: ignore[arg-type]
-    assert any(e.constraint == "feature_not_implemented" for e in excinfo.value.errors)
-    assert any("not yet implemented" in e.message for e in excinfo.value.errors)
-
-
-def test_any_branch_coverage_column_rejected() -> None:
-    """coverage_column inside any: branch also fires the feature gate."""
-    af = make_fake_af()
-    sel = Selector(
-        any_branches=[AnyBranch(coverage_column="snps_hit_1240k")],
-    )
-    with pytest.raises(UsageError) as excinfo:
-        select_samples(af, sel)  # type: ignore[arg-type]
-    assert any("any[0].coverage_column" in e.message for e in excinfo.value.errors)
+# --- Feature gate (empty as of Day 7; full HLD v0.1 surface wired) ---

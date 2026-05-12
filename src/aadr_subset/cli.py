@@ -126,6 +126,22 @@ def validate_command(ctx: click.Context, selector_path: str) -> None:
     "fails to resolve. Default: warn to stderr and proceed with the resolvable "
     "subset.",
 )
+@click.option(
+    "--coverage-column",
+    default=None,
+    metavar="NAME",
+    help="Canonical coverage field for min_coverage filters. Routed through "
+    "AnnoFrame.coverage_via(NAME). Useful for v62.0 (class D, no native "
+    "coverage column) — pass e.g. 'snps_hit_1240k' for a derived proxy. "
+    "Selector's coverage_column: takes precedence when both are set.",
+)
+@click.option(
+    "--coverage-derive",
+    default=None,
+    metavar="NAME",
+    help="Alias for --coverage-column (only one of the two may be set). "
+    "Mnemonic for the v62-class-D derived-proxy use case.",
+)
 @click.pass_context
 def select_command(
     ctx: click.Context,
@@ -140,6 +156,8 @@ def select_command(
     source_anno: str | None,
     mid_bridge: str | None,
     strict_resolve: bool,
+    coverage_column: str | None,
+    coverage_derive: str | None,
 ) -> None:
     """Materialize a selector against a target AADR .anno; emit sample IDs / TSV / JSON.
 
@@ -160,6 +178,8 @@ def select_command(
         source_anno=source_anno,
         mid_bridge=mid_bridge,
         strict_resolve=strict_resolve,
+        coverage_column=coverage_column,
+        coverage_derive=coverage_derive,
         quiet=ctx.obj["quiet"],
     )
     sys.exit(exit_code)

@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Day 7 — --coverage-column / --coverage-derive flags)
+
+Closes out the last HLD v0.1 selector key. `min_coverage` filters now
+route through `AnnoFrame.coverage_via(name)` when a `coverage_column:`
+override is supplied (either in the selector YAML or via CLI), making
+v62.0 (class D, no native coverage column) usable instead of silently
+empty.
+
+- **`engine.select_samples` gains `coverage_column: str | None`**.
+  Effective top-level value is `selector.coverage_column or
+  cli_coverage_column` (selector wins per HLD §Coverage handling).
+  Each `any:` branch resolves to
+  `branch.coverage_column or top_effective` so a branch can pin its
+  own override while inheriting otherwise.
+- **`engine._coverage_series`** — new helper that picks `af.coverage`
+  when no override is set, else `af.coverage_via(name)`. Maps
+  `aadr_resolve.MissingNativeFieldError` to `IOFailure` so the user
+  sees a clean exit-2 message ("coverage column 'X' is not available
+  in v66.0 (schema class E)") instead of an internal traceback.
+- **`commands/select_cmd._normalize_coverage_flags`** — merges
+  `--coverage-column` and `--coverage-derive` (HLD §Coverage handling
+  aliases). Both-set is `UsageError` (exit 4) rather than silent
+  precedence.
+- **`run_select`** now:
+  - threads `cli_coverage_column` into engine + signature compute.
+  - records `result.coverage_column_used` (the effective post-merge
+    value), exposed via the JSON output's `coverage_column` top-level key.
+  - suppresses the v62 class-D coverage warning when any override is
+    supplied (selector-level or CLI-level) — the proxy path makes the
+    "silently empty" failure mode go away.
+- **`selector.compute_signature` integration**: `cli_coverage_column`
+  enters the signature only when the selector itself doesn't set
+  `coverage_column:`. Run reproducibility now captures the effective
+  column.
+- **CLI**: `select` gains `--coverage-column NAME` and
+  `--coverage-derive NAME` (aliases). `--help` documents both.
+- **Engine feature gate is now empty.** All HLD v0.1 selector grammar
+  is wired. Day 7 closes the implementation phase; days 8-15 cover
+  templates, polish, performance, and v0.1.0 release.
+
 ### Added (Day 6 — cross-version IID lift via aadr-resolve)
 
 Cross-version is now a fully wired path through engine + run_select.

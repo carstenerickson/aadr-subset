@@ -46,6 +46,8 @@ def run_select(
     source_anno: str | None = None,
     mid_bridge: str | None = None,
     strict_resolve: bool = False,
+    coverage_column: str | None = None,
+    coverage_derive: str | None = None,
     quiet: bool = False,
 ) -> int:
     """Orchestrate `aadr-subset select`. Returns exit code per HLD §Exit codes.
@@ -63,6 +65,10 @@ def run_select(
     10. Stdout summary unless quiet.
     11. Return EXIT_SUCCESS.
     """
+    # 0. Normalize coverage flags. --coverage-column and --coverage-derive
+    # are aliases (HLD §Coverage handling); both-set → UsageError.
+    cli_coverage_column = _normalize_coverage_flags(coverage_column, coverage_derive)
+
     # 1. Load + validate selector.
     t_parse_start = time.monotonic()
     _metadata, selector = load_selector(
@@ -93,8 +99,12 @@ def run_select(
     t_parse_end = time.monotonic()
     parse_time = t_parse_end - t_parse_start
 
-    # 4. v62 class-D coverage warning.
-    _emit_v62_coverage_warning_if_needed(anno, selector)
+    # 4. v62 class-D coverage warning. Only fires when no override is
+    # supplied (selector-level OR CLI-level); --coverage-column /
+    # --coverage-derive routes the filter to a real Series so the
+    # silently-empty trap no longer applies.
+    if selector.coverage_column is None and cli_coverage_column is None:
+        _emit_v62_coverage_warning_if_needed(anno, selector)
 
     # 5. Engine evaluation (timed).
     t_eval_start = time.monotonic()
@@ -104,6 +114,7 @@ def run_select(
         source_anno=source_anno_frame,
         mid_bridge=Path(mid_bridge) if mid_bridge else None,
         strict_resolve=strict_resolve,
+        coverage_column=cli_coverage_column,
         include_matched_criteria=include_matched_criteria,
     )
     eval_time = time.monotonic() - t_eval_start
@@ -129,10 +140,14 @@ def run_select(
             "Pass --allow-empty for a sentinel-file write."
         )
 
-    # 7. Compute selector signature.
-    sig = compute_signature(selector, cli_coverage_column=None)
+    # 7. Compute selector signature. CLI coverage_column injects into
+    # the signature ONLY when the selector itself doesn't pin one
+    # (selector wins per HLD §Coverage handling).
+    sig = compute_signature(selector, cli_coverage_column=cli_coverage_column)
 
-    # 8. Populate run-env metadata on the result.
+    # 8. Populate run-env metadata on the result. coverage_column_used
+    # records the effective post-merge value (selector wins over CLI).
+    effective_cov_col = selector.coverage_column or cli_coverage_column
     result = replace(
         result,
         anno_file=str(anno_path),
@@ -140,6 +155,7 @@ def run_select(
         schema_class=anno.schema_class.value,
         selector_file=selector_path,
         selector_signature=sig,
+        coverage_column_used=effective_cov_col,
     )
 
     # 6. Write output (TSV / JSON / IDs via formats.py dispatcher).
@@ -170,6 +186,30 @@ def run_select(
         )
 
     return EXIT_SUCCESS
+
+
+def _normalize_coverage_flags(
+    coverage_column: str | None, coverage_derive: str | None
+) -> str | None:
+    """Merge --coverage-column / --coverage-derive into a single value.
+
+    Per HLD §Coverage handling the two flags are aliases; passing both is
+    a usage error so the conflict is surfaced rather than silently
+    favoring one.
+    """
+    if coverage_column is not None and coverage_derive is not None:
+        raise UsageError(
+            errors=[
+                ValidationError(
+                    file="<cli>",
+                    line=1,
+                    col=1,
+                    pointer="/--coverage-column",
+                    message=("--coverage-column and --coverage-derive are aliases; pass only one."),
+                )
+            ],
+        )
+    return coverage_column or coverage_derive
 
 
 def _resolve_cross_version_inputs(

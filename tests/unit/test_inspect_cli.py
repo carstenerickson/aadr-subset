@@ -97,15 +97,3 @@ def test_inspect_schema_unknown_exits_2(tmp_path: Path) -> None:
     selector.write_text("populations: [Western_HG]\n", encoding="utf-8")
     result = _run_cli("inspect", str(selector), str(bogus))
     assert result.returncode == 2
-
-
-def test_inspect_unsupported_feature_exits_4(tmp_path: Path, v66_anno: Path) -> None:
-    """Selectors using still-gated features → exit 4 from inspect too."""
-    selector = tmp_path / "cc.yaml"
-    selector.write_text(
-        "populations: [Western_HG]\ncoverage_column: snps_hit_1240k\n",
-        encoding="utf-8",
-    )
-    result = _run_cli("inspect", str(selector), str(v66_anno))
-    assert result.returncode == 4
-    assert "feature_not_implemented" in result.stderr
