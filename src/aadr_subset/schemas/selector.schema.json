@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/carstene/aadr-subset/schemas/selector.schema.json",
+  "title": "aadr-subset selector",
+  "description": "Declarative AADR panel-subset definition. Top-level keys AND-combine; `any:` provides one-level OR; `exclude:` provides one-level NOT-of-OR. Flat grammar — no nesting beyond one level. See cs-wiki/projects/aadr-subset.md for full semantics. Deprecated `master_ids:` / `master_ids_source:` aliases accepted in v0.1 with a load-time stderr warning; removed in v0.2.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "populations": {
+      "description": "Match against group_id (Group ID per AADR conventions). v66 dropped suffix variants (.SG/.AG/.DG) — selectors targeting v62 vs v66 use different literal values.",
+      "$ref": "#/$defs/non_empty_string_array"
+    },
+    "individual_ids": {
+      "description": "Match against individual_id (Master ID in v44-v62; Individual ID in v66+). Sample-stable across versions modulo MID-rename bridge handled by aadr-resolve.",
+      "$ref": "#/$defs/non_empty_string_array"
+    },
+    "individual_ids_source": {
+      "description": "Path to newline-delimited Individual ID list. Relative paths resolve to the selector YAML's directory. BOM tolerated; blank lines and `#`-prefix comments ignored; LF and CRLF accepted; internal-whitespace IDs are an error.",
+      "type": "string",
+      "minLength": 1
+    },
+    "source_version": {
+      "description": "AADR version the selector's individual_ids / individual_ids_source IDs are defined in. Required when resolve_to_version is set.",
+      "$ref": "#/$defs/aadr_version"
+    },
+    "resolve_to_version": {
+      "description": "AADR version to materialize the cohort against. When set, the CLI requires --source-anno PATH for the source-version .anno file.",
+      "$ref": "#/$defs/aadr_version"
+    },
+    "modern_only": {
+      "description": "Shorthand for date_calbp <= 70 (1880 CE; the AADR convention for present-day vs ancient). Samples with <NA> date FAIL this filter.",
+      "type": "boolean"
+    },
+    "min_coverage": {
+      "description": "Minimum 1240k-target coverage threshold. NaN coverage FAILS this filter (modern array-genotyped samples appear as NaN). v62 inputs (class D) have no native coverage column — see coverage_column and --coverage-derive snps_hit_1240k.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    "coverage_column": {
+      "description": "Override the canonical coverage column source; forwards to AnnoFrame.coverage_via(NAME). Selector-side value wins over CLI --coverage-column. Included in selector_signature.",
+      "type": "string",
+      "minLength": 1
+    },
+    "date": {
+      "description": "Date filter on date_calbp (canonical calBP integer years from Reich Lab's `Date mean in BP` column). Semantic constraint date.min_calbp <= date.max_calbp is enforced post-schema with exit 4.",
+      "$ref": "#/$defs/date_range"
+    },
+    "any": {
+      "description": "OR-block. Array of branches; each branch is an AND-block. Branches may NOT contain nested `any:` or `exclude:` (flat grammar — see HLD § Selector grammar semantics).",
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/branch" }
+    },
+    "exclude": {
+      "description": "NOT-of-OR block. A sample matching ANY condition is dropped. May NOT contain nested `exclude:` or `any:`.",
+      "$ref": "#/$defs/exclude_block"
+    },
+    "master_ids": {
+      "description": "DEPRECATED alias for individual_ids. Removed in v0.2.",
+      "deprecated": true,
+      "$ref": "#/$defs/non_empty_string_array"
+    },
+    "master_ids_source": {
+      "description": "DEPRECATED alias for individual_ids_source. Removed in v0.2.",
+      "deprecated": true,
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "allOf": [
+    {
+      "description": "Reject specifying both canonical and deprecated aliases for the same concept.",
+      "not": {
+        "anyOf": [
+          { "required": ["individual_ids", "master_ids"] },
+          { "required": ["individual_ids_source", "master_ids_source"] }
+        ]
+      }
+    },
+    {
+      "description": "resolve_to_version requires source_version (so the engine knows what version to bridge from).",
+      "if":   { "required": ["resolve_to_version"] },
+      "then": { "required": ["source_version"] }
+    },
+    {
+      "description": "source_version is meaningful only with cross-version resolution.",
+      "if":   { "required": ["source_version"] },
+      "then": { "required": ["resolve_to_version"] }
+    }
+  ],
+  "$defs": {
+    "non_empty_string_array": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "aadr_version": {
+      "description": "AADR public-release identifier. Bench-verified set as of 2026-05; new releases extend this enum.",
+      "type": "string",
+      "enum": ["v44.3", "v50.0", "v52.2", "v54.1", "v62.0", "v66.0"]
+    },
+    "date_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "min_calbp": {
+          "description": "Inclusive lower bound on date_calbp (years before 1950 CE).",
+          "type": "integer",
+          "minimum": -10000,
+          "maximum": 1000000
+        },
+        "max_calbp": {
+          "description": "Inclusive upper bound on date_calbp.",
+          "type": "integer",
+          "minimum": -10000,
+          "maximum": 1000000
+        }
+      }
+    },
+    "branch": {
+      "description": "An `any:` branch is a flat AND-block. Allowed keys are the same as top-level filter keys EXCEPT `any:`, `exclude:`, `source_version:`, and `resolve_to_version:` (those are top-level-only).",
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "populations":           { "$ref": "#/$defs/non_empty_string_array" },
+        "individual_ids":        { "$ref": "#/$defs/non_empty_string_array" },
+        "individual_ids_source": { "type": "string", "minLength": 1 },
+        "modern_only":           { "type": "boolean" },
+        "min_coverage":          { "type": "number", "minimum": 0, "maximum": 1000 },
+        "coverage_column":       { "type": "string", "minLength": 1 },
+        "date":                  { "$ref": "#/$defs/date_range" },
+        "master_ids": {
+          "description": "DEPRECATED alias for individual_ids.",
+          "deprecated": true,
+          "$ref": "#/$defs/non_empty_string_array"
+        },
+        "master_ids_source": {
+          "description": "DEPRECATED alias for individual_ids_source.",
+          "deprecated": true,
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "exclude_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "group_ids": {
+          "description": "Group_IDs to exclude.",
+          "$ref": "#/$defs/non_empty_string_array"
+        },
+        "individual_ids": {
+          "description": "Individual_IDs to exclude.",
+          "$ref": "#/$defs/non_empty_string_array"
+        },
+        "populations": {
+          "description": "Alias for group_ids (accept either spelling).",
+          "$ref": "#/$defs/non_empty_string_array"
+        }
+      }
+    }
+  }
+}
