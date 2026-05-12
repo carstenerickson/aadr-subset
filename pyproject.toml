@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aadr-subset"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Declarative AADR panel subsetting from YAML selectors; the missing first-class tool for cohort definitions in ancient-DNA / population-genetics workflows."
 readme = "README.md"
 license = { text = "MIT" }
@@ -26,11 +26,11 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    # aadr-resolve: hard library dependency per HLD §aadr-resolve as a library dependency.
-    # Day-1 modules (selector, validate) don't actually import it; first import lands on Day 2
-    # when engine.py is wired up. Switch to "aadr-resolve>=0.1.0,<0.2.0" once aadr-resolve ships
-    # to PyPI; until then, install from GitHub for dev/CI.
-    "aadr-resolve @ git+https://github.com/carstenerickson/aadr-resolve.git",
+    # aadr-resolve is the hard library dependency per HLD §aadr-resolve as a
+    # library dependency. Tracking the 0.2.x line: 0.2.0 ships the
+    # `MissingNativeFieldError`, `AnnoFrame.path`, and `resolve_master_ids`
+    # APIs that aadr-subset relies on.
+    "aadr-resolve>=0.2.0,<0.3",
     "pandas>=2.2,<3",
     "pyyaml>=6.0",
     "ruamel.yaml>=0.18",

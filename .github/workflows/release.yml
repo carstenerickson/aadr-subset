@@ -1,0 +1,123 @@
+# Build → smoke-test → publish pipeline.
+#
+# Fires on `v*` tag push (e.g. `v0.1.0`). Three jobs in sequence:
+#   1. build: sdist + wheel on a single runner.
+#   2. smoke-test: install the built wheel + run a CLI smoke check
+#      across the full Python × OS matrix that CI uses.
+#   3. publish: OIDC-authenticated PyPI upload.
+#
+# The smoke test exists so packaging-only breakage (missing package
+# data, dependency-resolution failures, entry-point misconfig) fails
+# fast BEFORE publish, without running the full pytest suite (CI's
+# job, on source).
+#
+# Trigger:
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Per LLD §6.2.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build sdist + wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build
+        run: python -m build
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  smoke-test:
+    name: smoke-test-py${{ matrix.python }}-${{ matrix.os }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+        os: ["ubuntu-latest", "macos-latest"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Download built dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install built wheel
+        run: |
+          python -m pip install --upgrade pip
+          # Install the freshly built wheel — exercises packaging
+          # metadata + dependency resolution (aadr-resolve from PyPI).
+          pip install dist/aadr_subset-*-py3-none-any.whl
+
+      - name: Smoke — --version
+        run: aadr-subset --version
+
+      - name: Smoke — template list
+        run: |
+          # Verify shipped templates load from package data after a
+          # clean install (catches a missing-package-data regression).
+          aadr-subset template > /tmp/template_list
+          test -s /tmp/template_list
+          grep -q iron_age_britain /tmp/template_list
+
+      - name: Smoke — template emit
+        run: |
+          # Emit a template + validate it. Exercises load_template +
+          # selector.validate without needing a .anno on hand.
+          aadr-subset template iron_age_britain -o /tmp/starter.yaml
+          aadr-subset validate /tmp/starter.yaml
+
+  publish:
+    name: publish to PyPI
+    needs: smoke-test
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/aadr-subset
+    permissions:
+      # OIDC publish — no API token stored anywhere. The PyPI project
+      # must be configured for "trusted publishing" with this repo +
+      # workflow filename + environment name.
+      id-token: write
+    steps:
+      - name: Download built dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish via OIDC
+        uses: pypa/gh-action-pypi-publish@release/v1

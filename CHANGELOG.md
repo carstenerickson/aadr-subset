@@ -5,7 +5,100 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] — 2026-05-12
+
+First public release.
+
+### Highlights
+
+`aadr-subset` is a declarative AADR panel-subsetting CLI + library:
+ship a YAML selector, get back a sample-ID list / TSV / JSON or a
+per-population aggregate report. Built on
+[aadr-resolve](https://pypi.org/project/aadr-resolve/) for cross-AADR-
+version sample-ID mapping.
+
+The five subcommands cover the full cohort lifecycle:
+- `validate` — JSON-schema + semantic check, no `.anno` required (CI gate).
+- `select` — materialize the cohort. `--format {ids,tsv,json}`,
+  `-o PATH` (atomic), `--source-anno` for cross-version lift,
+  `--coverage-column`/`--coverage-derive` for v62-class-D proxy
+  coverage, `--strict-resolve` for fail-on-missing-IID, `--allow-empty`.
+- `inspect` — diagnostic dry-run; always exits 0.
+- `report` — per-population aggregates (group_id, n_matched, n_in_anno,
+  pct_matched, date range, coverage stats) as TSV or JSON.
+- `template` — discover + emit 6 starter templates.
+
+### Reproducibility
+
+Every `SubsetResult` carries a `selector_signature` — RFC 8785 JCS
+canonical-form SHA-256 over selector intent. Invariant to YAML key
+ordering, list ordering for set-like fields, `individual_ids_source`
+path differences (file *content* drives the hash, not the path), and
+metadata-block changes. Captures the effective `coverage_column` so
+two runs with different `--coverage-derive` values produce different
+signatures.
+
+JSON output records the full run-env: AADR version + schema class,
+selector + source-anno paths, aadr-subset + aadr-resolve versions,
+coverage column used, schema_version (additive new keys are
+non-breaking).
+
+### Template catalog (verified against v62.0 + v66.0)
+
+- `modern_european` — modern reference set (570 v66 / 493 v62 matched)
+- `iron_age_britain` — England_IA cohort (45 / 9)
+- `bronze_age_europe` — Bell Beaker + Corded Ware + Yamnaya + Unetice (259 / 199)
+- `wsh_steppe_pool` — Yamnaya + Poltavka + Eneolithic-steppe (72 / 21)
+- `neolithic_anatolia` — Catalhoyuk + Barcin + consolidated Turkey_N (58 / 28)
+- `viking_period_scandinavian` — homeland + diaspora (238 / 224)
+
+Templates auto-skip releases they don't claim in `tested_against:`
+metadata, so adding a new template against just the current AADR
+release doesn't fail audits for older versions.
+
+### Performance (v66.HO, 27,755 samples, class E, MacBook Air M2)
+
+- `AnnoFrame.from_path`: ~460 ms
+- `engine.select_samples`: ~7 ms per call (warm; per-AnnoFrame caches
+  on first call)
+- `compute_signature`: ~0.03 ms
+- End-to-end `select` CLI (incl. Python + click startup): ~600 ms
+
+### Engine surface (HLD v0.1 grammar complete)
+
+Top-level AND of: `populations`, `individual_ids` +
+`individual_ids_source`, `modern_only`, `date.{min,max}_calbp`,
+`min_coverage` + optional `coverage_column`. Plus one-level `any:` OR
+(per-branch fields + optional per-branch `coverage_column` override)
+and one-level `exclude:` NOT-of-OR. Cross-version via `source_version`
++ `resolve_to_version` lifts source Individual_IDs to target via
+`aadr_resolve.resolve_master_ids`.
+
+### CI + release
+
+- GitHub Actions matrix: Python 3.11/3.12/3.13 × Ubuntu/macOS
+- Coverage gate: 90% (currently ~92%)
+- mypy `--strict`; ruff lint + format
+- Release pipeline: build → smoke-test on full matrix → OIDC PyPI publish
+- 188 unit tests + 12 integration tests (latter gated on
+  `AADR_V62_ANNO_PATH` / `AADR_V66_ANNO_PATH`)
+
+### Dependencies
+
+- `aadr-resolve >=0.2.0, <0.3` (PyPI)
+- `pandas >=2.2, <3`
+- `click >=8.1, <9`
+- `pyyaml >=6.0`
+- `ruamel.yaml >=0.18`
+- `jsonschema >=4.20`
+- `rfc8785 >=0.1`
+
+---
+
+## Pre-release development log
+
+The day-by-day implementation history is preserved below for context.
+Production use should reference the `[0.1.0]` section above.
 
 ### Changed (Day 10 — v66.0 template verification + README rewrite)
 
