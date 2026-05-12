@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Day 6 — cross-version IID lift via aadr-resolve)
+
+Cross-version is now a fully wired path through engine + run_select.
+The selector key `resolve_to_version:` activates the lift: source
+Individual_IDs are mapped to target Individual_IDs through
+`aadr_resolve.resolve_master_ids`, then the engine's predicate mask
+matches `af.individual_id.isin(target_iids)`. The target-IID set
+captures every row for each individual in target (multi-library /
+multi-data-type), per HLD test 16.
+
+- **`engine.select_samples` gains three kwargs**: `source_anno`,
+  `mid_bridge`, `strict_resolve`. When `selector.resolve_to_version`
+  is set, engine calls `_resolve_cross_version` before mask
+  construction; `target_iids` supersedes
+  `selector.individual_ids` for that run. `strict_resolve=True`
+  raises `SoftValidationFailure` (exit 1) when any source IID fails to
+  place in target; default behavior surfaces those IDs via
+  `SubsetResult.warnings.missing_after_resolve` and continues.
+- **`engine._resolve_cross_version`** — wraps
+  `aadr_resolve.resolve_master_ids(ids, src_version, dst_version,
+  anno_paths={...}, mid_bridge=...)`. CollisionDetected from
+  aadr-resolve is re-raised as `InvariantViolation` (cross-lab MID
+  collision is a bridge-quality problem, not user input). Defensive
+  None-check on `source_anno.path` / `target_anno.path` guards against
+  AnnoFrames built outside `from_path()`.
+- **`engine._lift_gid_to_iid`** — `aadr_resolve.resolve_master_ids`
+  returns target *Genetic_IDs*; the engine lifts each back to its
+  target Individual_ID via a per-AnnoFrame `(gid → iid)` cache so the
+  later `af.individual_id.isin(...)` mask catches every row for that
+  individual. Cache is keyed by `id(af)` and built lazily on first
+  call.
+- **`commands/select_cmd._resolve_cross_version_inputs`** — validates
+  the four flag/selector combinations up front (LLD §4.1 step 4):
+  no-op when neither side is set; `UsageError` on each of the three
+  malformed combinations; verifies target `anno.version` matches
+  `selector.resolve_to_version` and (when set) source `anno.version`
+  matches `selector.source_version`.
+- **Non-strict missing-IID warning** — after engine returns,
+  `run_select` surfaces `warnings.missing_after_resolve` to stderr
+  unless `--strict-resolve` was passed (in which case engine already
+  raised). First 10 IDs shown inline; tail count appended as
+  `(+N more)` when the list is longer.
+- **CLI**: `select` gains `--source-anno PATH`, `--mid-bridge PATH`,
+  `--strict-resolve`. `--source-anno` and the selector's
+  `resolve_to_version:` form a hard requirement pair (each errors with
+  a clear message when used without the other).
+- **Feature gate shrinks** to just `coverage_column:` (pending the
+  `--coverage-column` / `--coverage-derive` CLI flags). Day 6 closes
+  out the last HLD-listed v0.1 engine feature.
+
 ### Added (Day 5 — selector signature + report subcommand)
 
 Reproducibility primitive (selector signature) and the third output

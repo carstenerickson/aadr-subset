@@ -1,11 +1,13 @@
 """select subcommand orchestrator.
 
-Day 2: single-version path only — selector with populations and/or
-individual_ids matched against a target .anno. Cross-version
-(--source-anno + resolve_to_version:) lands on Day 6. Output is
-sample-ID list only (--format=ids); TSV + JSON land on Day 4.
+Day 6: full HLD select surface end-to-end —
+- Single-version selectors (Day 2 surface)
+- ids / tsv / json output (Day 4)
+- Selector signature (Day 5)
+- Cross-version IID lift via --source-anno + selector.resolve_to_version
+  + optional --mid-bridge + --strict-resolve
 
-Per LLD §3.9 / §4.1, simplified to the Day-2 surface.
+Per LLD §3.9 / §4.1.
 """
 
 from __future__ import annotations
@@ -41,35 +43,32 @@ def run_select(
     allow_empty: bool,
     allow_empty_source: bool,
     include_matched_criteria: bool,
-    quiet: bool,
+    source_anno: str | None = None,
+    mid_bridge: str | None = None,
+    strict_resolve: bool = False,
+    quiet: bool = False,
 ) -> int:
     """Orchestrate `aadr-subset select`. Returns exit code per HLD §Exit codes.
 
-    Day-2 sequence (§4.1 reduced):
-    1. Load + validate selector (load_selector with collect_all_errors=False;
-       fail-fast on first batch).
-    2. Reject Day-3+ features early via UsageError (engine also enforces,
-       but doing it pre-AnnoFrame-load saves the .anno parse cost on
-       guaranteed-fail selectors). NB: actually engine does this; this
-       comment documents the design.
-    3. Load target AnnoFrame from anno_path (catches SchemaDetectionError
-       → IOFailure).
-    4. engine.select_samples (timed).
-    5. Exit-1 gate: n_matched == 0 and not allow_empty → SoftValidationFailure.
-    6. Write output via formats.write_ids (timed).
-    7. Stdout summary unless quiet.
-    8. Return EXIT_SUCCESS.
+     Day-6 sequence (§4.1):
+     1. Load + validate selector.
+     2. Load target AnnoFrame from anno_path.
+     3. Cross-version flag check + (optional) source AnnoFrame load.
+     4. v62 class-D coverage warning if applicable.
+     5. engine.select_samples (timed).
+     6. Exit-1 gate: n_matched == 0 and not allow_empty → SoftValidationFailure.
+     7. Compute selector signature.
+     8. Populate run-env metadata.
+     9. Write output via write_select_output (timed).
+    10. Stdout summary unless quiet.
+    11. Return EXIT_SUCCESS.
     """
     # 1. Load + validate selector.
     t_parse_start = time.monotonic()
-    try:
-        _metadata, selector = load_selector(
-            selector_path,
-            allow_empty_source=allow_empty_source,
-        )
-    except UsageError:
-        # Re-raise; cli.py top-level handler will format errors to stderr.
-        raise
+    _metadata, selector = load_selector(
+        selector_path,
+        allow_empty_source=allow_empty_source,
+    )
 
     # 2. Load target AnnoFrame.
     schema_override_enum = _parse_schema_override(schema_override)
@@ -83,38 +82,57 @@ def run_select(
     except (OSError, aadr_resolve.IOFailure) as e:
         raise IOFailure(f"cannot load .anno at {anno_path}: {e}") from e
 
+    # 3. Cross-version branch (LLD §4.1 step 4).
+    source_anno_frame = _resolve_cross_version_inputs(
+        selector,
+        source_anno=source_anno,
+        target_anno=anno,
+        schema_override_enum=schema_override_enum,
+    )
+
     t_parse_end = time.monotonic()
     parse_time = t_parse_end - t_parse_start
 
-    # 3. v62 class-D coverage warning (HLD §Coverage handling). Fires when
-    # the selector touches min_coverage AND target .anno is class D
-    # (v62.0; no native coverage column) AND no override flag is set.
-    # The --coverage-column / --coverage-derive opt-in lands later; until
-    # then this warning is informational only.
+    # 4. v62 class-D coverage warning.
     _emit_v62_coverage_warning_if_needed(anno, selector)
 
-    # 4. Engine evaluation (timed).
+    # 5. Engine evaluation (timed).
     t_eval_start = time.monotonic()
     result = select_samples(
         anno,
         selector,
+        source_anno=source_anno_frame,
+        mid_bridge=Path(mid_bridge) if mid_bridge else None,
+        strict_resolve=strict_resolve,
         include_matched_criteria=include_matched_criteria,
     )
     eval_time = time.monotonic() - t_eval_start
 
-    # 4. Exit-1 gates.
+    # 5b. Cross-version missing-IID stderr warning (non-strict path).
+    # strict_resolve already raised SoftValidationFailure inside engine
+    # if there were missing IIDs; if we got here with missing entries,
+    # surface them as a warning to stderr.
+    if result.warnings.missing_after_resolve and not strict_resolve:
+        missing = result.warnings.missing_after_resolve
+        shown = missing[:10]
+        more = "" if len(missing) <= 10 else f" (+{len(missing) - 10} more)"
+        sys.stderr.write(
+            f"WARNING: {len(missing)} Individual_ID(s) failed to resolve from "
+            f"{selector.source_version} to {selector.resolve_to_version}: "
+            f"{shown}{more}. Pass --strict-resolve to fail on this.\n"
+        )
+
+    # 6. Exit-1 gates.
     if result.n_matched == 0 and not allow_empty:
         raise SoftValidationFailure(
             "selector matched 0 samples — output not written. "
             "Pass --allow-empty for a sentinel-file write."
         )
 
-    # 5. Compute selector signature (LLD §3.3 / §4.1 step 5). cli_coverage_column
-    # is None until the --coverage-column flag lands; selector.coverage_column
-    # alone determines the signature contribution today.
+    # 7. Compute selector signature.
     sig = compute_signature(selector, cli_coverage_column=None)
 
-    # 6. Populate run-env metadata on the result.
+    # 8. Populate run-env metadata on the result.
     result = replace(
         result,
         anno_file=str(anno_path),
@@ -122,7 +140,6 @@ def run_select(
         schema_class=anno.schema_class.value,
         selector_file=selector_path,
         selector_signature=sig,
-        # coverage_column_used lands with the --coverage-column flag.
     )
 
     # 6. Write output (TSV / JSON / IDs via formats.py dispatcher).
@@ -153,6 +170,110 @@ def run_select(
         )
 
     return EXIT_SUCCESS
+
+
+def _resolve_cross_version_inputs(
+    selector: Selector,
+    *,
+    source_anno: str | None,
+    target_anno: aadr_resolve.AnnoFrame,
+    schema_override_enum: "aadr_resolve.types.SchemaClass | None",
+) -> aadr_resolve.AnnoFrame | None:
+    """Validate cross-version flag/selector combinations + load source .anno
+    when both are present. Returns the source AnnoFrame or None.
+
+    Rules (LLD §4.1 step 4):
+    - resolve_to_version is None + source_anno is None: single-version path.
+    - resolve_to_version is None + source_anno is set: UsageError.
+    - resolve_to_version is set + source_anno is None: UsageError.
+    - Both set: load source AnnoFrame; verify version match against
+      selector.source_version (UsageError on mismatch); verify target
+      anno.version matches selector.resolve_to_version (UsageError on
+      mismatch).
+    """
+    if selector.resolve_to_version is None:
+        if source_anno is not None:
+            raise UsageError(
+                errors=[
+                    ValidationError(
+                        file="<cli>",
+                        line=1,
+                        col=1,
+                        pointer="/--source-anno",
+                        message=(
+                            "--source-anno is meaningful only with cross-version "
+                            "resolution; selector does not set resolve_to_version"
+                        ),
+                    )
+                ],
+            )
+        return None
+
+    # resolve_to_version is set.
+    if source_anno is None:
+        raise UsageError(
+            errors=[
+                ValidationError(
+                    file=str(selector.resolve_to_version),
+                    line=1,
+                    col=1,
+                    pointer="/resolve_to_version",
+                    message=(
+                        f"selector sets resolve_to_version: "
+                        f"{selector.resolve_to_version} but --source-anno was "
+                        f"not provided"
+                    ),
+                )
+            ],
+        )
+
+    # Load source AnnoFrame.
+    try:
+        source_af = aadr_resolve.AnnoFrame.from_path(
+            source_anno,
+            schema_override=schema_override_enum,
+        )
+    except aadr_resolve.SchemaDetectionError as e:
+        raise IOFailure(f"source .anno schema unrecognized: {e}") from e
+    except (OSError, aadr_resolve.IOFailure) as e:
+        raise IOFailure(f"cannot load source .anno at {source_anno}: {e}") from e
+
+    # Verify source version matches selector.source_version (if set).
+    if selector.source_version is not None and source_af.version != selector.source_version:
+        raise UsageError(
+            errors=[
+                ValidationError(
+                    file=str(source_anno),
+                    line=1,
+                    col=1,
+                    pointer="/--source-anno",
+                    message=(
+                        f"--source-anno version is {source_af.version!r} but "
+                        f"selector source_version is {selector.source_version!r}"
+                    ),
+                )
+            ],
+        )
+
+    # Verify target version matches selector.resolve_to_version.
+    if target_anno.version != selector.resolve_to_version:
+        raise UsageError(
+            errors=[
+                ValidationError(
+                    file=str(target_anno.path) if target_anno.path else "<target-anno>",
+                    line=1,
+                    col=1,
+                    pointer="/resolve_to_version",
+                    message=(
+                        f"target .anno version is {target_anno.version!r} but "
+                        f"selector resolve_to_version is "
+                        f"{selector.resolve_to_version!r}"
+                    ),
+                )
+            ],
+        )
+
+    return source_af
 
 
 def _emit_v62_coverage_warning_if_needed(anno: aadr_resolve.AnnoFrame, selector: Selector) -> None:

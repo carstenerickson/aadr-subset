@@ -105,6 +105,27 @@ def validate_command(ctx: click.Context, selector_path: str) -> None:
     is_flag=True,
     help="Include per-sample matched_criteria in JSON output (off by default).",
 )
+@click.option(
+    "--source-anno",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Source .anno for cross-version IID lift. Required when selector sets resolve_to_version.",
+)
+@click.option(
+    "--mid-bridge",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Optional MID-rename bridge TSV (4 cols: v_old_label, mid_old, "
+    "v_new_label, mid_new). Layers on top of aadr-resolve's GID-stable "
+    "auto-detection.",
+)
+@click.option(
+    "--strict-resolve",
+    is_flag=True,
+    help="On cross-version resolution, fail exit 1 if any source Individual_ID "
+    "fails to resolve. Default: warn to stderr and proceed with the resolvable "
+    "subset.",
+)
 @click.pass_context
 def select_command(
     ctx: click.Context,
@@ -116,14 +137,16 @@ def select_command(
     allow_empty: bool,
     allow_empty_source: bool,
     include_matched_criteria: bool,
+    source_anno: str | None,
+    mid_bridge: str | None,
+    strict_resolve: bool,
 ) -> None:
     """Materialize a selector against a target AADR .anno; emit sample IDs / TSV / JSON.
 
-    Day-3 surface: populations + individual_ids + date + modern_only +
-    min_coverage + any:/exclude: combinators against a single .anno.
-    Day-4 adds TSV + JSON output formats.
-
-    Cross-version (--source-anno + selector.resolve_to_version) lands Day 6.
+    Full HLD select surface: populations + individual_ids + date +
+    modern_only + min_coverage + any:/exclude: combinators against a
+    single .anno; ids / tsv / json output; cross-version IID lift via
+    --source-anno + selector.resolve_to_version.
     """
     exit_code = run_select(
         selector_path=selector_path,
@@ -134,6 +157,9 @@ def select_command(
         allow_empty=allow_empty,
         allow_empty_source=allow_empty_source,
         include_matched_criteria=include_matched_criteria,
+        source_anno=source_anno,
+        mid_bridge=mid_bridge,
+        strict_resolve=strict_resolve,
         quiet=ctx.obj["quiet"],
     )
     sys.exit(exit_code)

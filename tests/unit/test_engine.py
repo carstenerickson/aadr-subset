@@ -469,13 +469,12 @@ def test_complex_selector_and_or_not() -> None:
     "selector_kwargs",
     [
         {"coverage_column": "snps_hit_1240k"},
-        {"source_version": "v44.3", "resolve_to_version": "v66.0"},
     ],
 )
 def test_unsupported_features_rejected(selector_kwargs: dict[str, object]) -> None:
-    """Engine rejects features that haven't landed yet. As of Day 3 the
-    list shrinks to coverage_column (Day 3+ CLI flag pending) and
-    cross-version (Day 6)."""
+    """Engine rejects features that haven't landed yet. As of Day 6 the
+    list is down to coverage_column (pending --coverage-column /
+    --coverage-derive CLI flags)."""
     af = make_fake_af()
     sel = Selector(**selector_kwargs)  # type: ignore[arg-type]
     with pytest.raises(UsageError) as excinfo:

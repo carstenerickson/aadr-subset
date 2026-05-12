@@ -1,25 +1,30 @@
 """Selector evaluation engine.
 
-Day 3 scope: full predicate set against a single AnnoFrame —
+Day 6 scope: full predicate set + cross-version IID lift via aadr-resolve.
+
 - populations / individual_ids / individual_ids_source (Day 2)
 - modern_only / date.min_calbp / date.max_calbp / min_coverage (Day 3)
 - any: OR-block + exclude: NOT-of-OR block (Day 3)
+- cross-version (source_version + resolve_to_version + --source-anno +
+  --mid-bridge + --strict-resolve) — Day 6
 
 Feature gate still rejects:
-- coverage_column: (Day 3 punt — landed as a selector grammar key but
-  the AnnoFrame.coverage_via() override isn't wired through yet; lands
+- coverage_column: (landed as a selector grammar key but the
+  AnnoFrame.coverage_via() override isn't wired through yet; lands
   with the --coverage-column / --coverage-derive CLI flags)
-- resolve_to_version / source_version (Day 6 — cross-version)
 
 Per LLD §3.4 evaluation algorithm.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import aadr_resolve
 import pandas as pd
 from aadr_resolve import AnnoFrame
 
-from .errors import UsageError, ValidationError
+from .errors import InvariantViolation, SoftValidationFailure, UsageError, ValidationError
 from .types import (
     AnyBranch,
     DateRange,
@@ -39,11 +44,18 @@ def select_samples(
     anno: AnnoFrame,
     selector: Selector,
     *,
+    source_anno: AnnoFrame | None = None,
+    mid_bridge: Path | None = None,
+    strict_resolve: bool = False,
     include_matched_criteria: bool = False,
 ) -> SubsetResult:
     """Evaluate selector against AnnoFrame; return SubsetResult.
 
     Algorithm per HLD §Selector evaluation algorithm:
+    0. (Day 6) Cross-version lift if selector.resolve_to_version is set:
+       lift source Individual_IDs to target Individual_IDs via
+       aadr_resolve.resolve_master_ids, then use target_iids in place
+       of selector.individual_ids in the predicate mask.
     1. Top-level AND mask over filter predicates.
     2. any: OR mask (or all-True if absent).
     3. exclude: NOT-of-OR mask (or all-True if absent).
@@ -53,18 +65,56 @@ def select_samples(
     6. Compute per_population_counts, per_branch_counts.
 
     Raises:
-        UsageError: a feature still in the Day-3+ gate was used
-            (currently: coverage_column or cross-version).
+        UsageError: a feature still in the gate was used (currently
+            coverage_column).
+        SoftValidationFailure: strict_resolve=True and at least one
+            source Individual_ID failed to resolve to target.
+        InvariantViolation: cross-lab MID collision detected by
+            aadr-resolve, or AnnoFrame.path is None on cross-version.
     """
     _reject_unsupported_features(selector)
 
+    # 0. Cross-version IID lift. When resolve_to_version is set, the
+    # selector's individual_ids (YAML + source-file union) are SOURCE IIDs;
+    # we lift them to TARGET IIDs via aadr-resolve and feed those into
+    # the top-level predicate mask instead.
+    target_iids: set[str] | None = None
+    missing_after_resolve: list[str] = []
+    if selector.resolve_to_version is not None:
+        if source_anno is None:
+            raise InvariantViolation(
+                "cross-version resolution requires source_anno; "
+                "run_select / orchestrator must pass it."
+            )
+        target_iids, missing_after_resolve = _resolve_cross_version(
+            selector,
+            source_anno=source_anno,
+            target_anno=anno,
+            mid_bridge=mid_bridge,
+        )
+        if missing_after_resolve and strict_resolve:
+            preview = missing_after_resolve[:10]
+            raise SoftValidationFailure(
+                f"{len(missing_after_resolve)} Individual_ID(s) failed to "
+                f"resolve from {selector.source_version} to "
+                f"{selector.resolve_to_version}. First {len(preview)}: "
+                f"{preview}. Pass --allow-empty if a partial cohort is OK, "
+                f"or drop --strict-resolve to downgrade to a warning."
+            )
+
     # 1. Top-level AND mask.
+    if target_iids is not None:
+        # Cross-version: target_iids supersedes selector.individual_ids.
+        # Pass the resolved target Individual_ID set as the predicate.
+        effective_individual_ids = sorted(target_iids)
+    else:
+        effective_individual_ids = list(
+            set(selector.individual_ids) | set(selector.individual_ids_from_source)
+        )
     top_and_mask = _build_predicate_mask(
         anno,
         populations=selector.populations,
-        individual_ids=list(
-            set(selector.individual_ids) | set(selector.individual_ids_from_source)
-        ),
+        individual_ids=effective_individual_ids,
         modern_only=selector.modern_only,
         min_coverage=selector.min_coverage,
         date=selector.date,
@@ -105,7 +155,10 @@ def select_samples(
         )
 
     n_matched = len(unique_gids)
-    warnings = SelectorWarnings(duplicate_genetic_ids=duplicates)
+    warnings = SelectorWarnings(
+        duplicate_genetic_ids=duplicates,
+        missing_after_resolve=missing_after_resolve,
+    )
     return SubsetResult(
         genetic_ids=unique_gids,
         n_matched=n_matched,
@@ -348,18 +401,15 @@ def _compute_matched_criteria(
 
 
 def _reject_unsupported_features(selector: Selector) -> None:
-    """Feature gate. Day 3 supports: populations, individual_ids,
-    individual_ids_source, modern_only, date, min_coverage, any:, exclude:.
+    """Feature gate.
 
     Still unsupported (raised with constraint=feature_not_implemented):
-    - coverage_column: (Day 3+ once --coverage-column CLI flag lands)
-    - cross-version (source_version + resolve_to_version) — Day 6
+    - coverage_column: (pending --coverage-column / --coverage-derive
+      CLI flags).
     """
     unsupported: list[str] = []
     if selector.coverage_column is not None:
         unsupported.append("coverage_column: (--coverage-column CLI flag pending)")
-    if selector.resolve_to_version is not None or selector.source_version is not None:
-        unsupported.append("cross-version (Day 6)")
 
     # Also reject coverage_column inside any: branches.
     for i, branch in enumerate(selector.any_branches):
@@ -411,6 +461,90 @@ def _filter_parallel(keys: list[str], values: list[str]) -> list[str]:
             seen.add(k)
             result.append(v)
     return result
+
+
+# --- Cross-version helpers (LLD §3.4 _resolve_cross_version) ---
+
+
+def _resolve_cross_version(
+    selector: Selector,
+    *,
+    source_anno: AnnoFrame,
+    target_anno: AnnoFrame,
+    mid_bridge: Path | None,
+) -> tuple[set[str], list[str]]:
+    """Lift source Individual_IDs to target Individual_IDs via aadr-resolve.
+
+    Returns (target_iids, missing). missing is the sorted list of source
+    IIDs that aadr-resolve could not place in target (returned None).
+
+    Path handling: aadr-resolve's AnnoFrame.from_path() populates
+    `anno.path` (Q9 resolved in aadr-resolve LLD). Defensive None-check
+    catches the rare case where an AnnoFrame was synthesized outside
+    from_path().
+
+    CollisionDetected → InvariantViolation (cross-lab MID collision is
+    a bridge-quality problem, not a user error).
+    """
+    if source_anno.path is None or target_anno.path is None:
+        raise InvariantViolation(
+            "cross-version resolution requires AnnoFrames constructed "
+            "via AnnoFrame.from_path(); one or both .path is None"
+        )
+
+    source_iids = set(selector.individual_ids) | set(selector.individual_ids_from_source)
+    if not source_iids:
+        return set(), []
+
+    try:
+        result = aadr_resolve.resolve_master_ids(
+            ids=sorted(source_iids),
+            src_version=selector.source_version or "<unknown>",
+            dst_version=selector.resolve_to_version or "<unknown>",
+            anno_paths={
+                (selector.source_version or "<unknown>"): source_anno.path,
+                (selector.resolve_to_version or "<unknown>"): target_anno.path,
+            },
+            mid_bridge=mid_bridge,
+        )
+    except aadr_resolve.CollisionDetected as e:
+        raise InvariantViolation(
+            f"aadr-resolve detected a cross-lab MID collision while "
+            f"resolving Individual_IDs from {selector.source_version} "
+            f"to {selector.resolve_to_version}: {e}"
+        ) from e
+
+    target_iids: set[str] = set()
+    missing: list[str] = []
+    for src_iid in sorted(source_iids):
+        target_gid = result.get(src_iid)
+        if target_gid is None:
+            missing.append(src_iid)
+            continue
+        target_iid = _lift_gid_to_iid(target_anno, target_gid)
+        if target_iid is None:
+            # resolve_master_ids returned a GID that doesn't exist in
+            # target.genetic_id — treat as missing rather than dropping.
+            missing.append(src_iid)
+        else:
+            target_iids.add(target_iid)
+    return target_iids, missing
+
+
+# Module-level per-AnnoFrame gid→iid cache. id(af) keys avoid leaking
+# references; AnnoFrame instances are short-lived (one per run).
+_GID_TO_IID_CACHE: dict[int, dict[str, str]] = {}
+
+
+def _lift_gid_to_iid(af: AnnoFrame, gid: str) -> str | None:
+    """Look up Individual_ID for a Genetic_ID in `af`. Builds a cached
+    dict on first call per AnnoFrame instance."""
+    key = id(af)
+    table = _GID_TO_IID_CACHE.get(key)
+    if table is None:
+        table = dict(zip(af.genetic_id.tolist(), af.individual_id.tolist(), strict=True))
+        _GID_TO_IID_CACHE[key] = table
+    return table.get(gid)
 
 
 __all__ = ["select_samples"]
