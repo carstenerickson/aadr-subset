@@ -1,23 +1,32 @@
 # Bronze Age Europe starter template (~5000-2700 calBP).
 #
-# Verified against AADR v62.0. Labels follow the AADR convention
-# `Country_(Period_)Culture.{AG|SG|DG}`; there is no pan-European
-# `Bell_Beaker` or `Corded_Ware` label — they're broken out by
-# country (Czechia, Germany, England, France, Poland, etc.).
-tested_against: [v62.0]
+# Verified against AADR v62.0 + v66.0. Suffix variants in v62 (.AG/.SG)
+# were dropped in v66; both forms included so the template resolves
+# against either release. v66 additionally fragments several large
+# horizons (Germany_BellBeaker, Germany_CordedWare) into site-specific
+# labels — those v66 labels are not enumerated here individually; rely
+# on the canonical country-prefix labels that survived.
+tested_against: [v62.0, v66.0]
 last_verified: '2026-05-12'
 maintainer: aadr-subset
 notes: |
-  Pan-European Bronze Age cohort spanning the canonical archaeological
+  Pan-European Bronze Age cohort spanning canonical archaeological
   horizons (Bell Beaker, Corded Ware, Unetice, Yamnaya). Pulls from
   several countries so the cohort is broad enough for PCA / clustering
   context. For tight ancestry questions, narrow to one country per
-  horizon (e.g. just `Germany_BellBeaker.AG` + `Germany_CordedWare.AG`).
+  horizon (e.g. just `Czechia_BellBeaker` + `Czechia_EBA_CordedWare`).
+
+  v66 site-level granularity: if you need Germany BellBeaker /
+  CordedWare specifically on v66, add the site-prefix variants
+  (e.g. `Germany_AugsburgHugoEckenerStrasse_BellBeaker`,
+  `Germany_Esperstedt_CordedWare`). They exist as separate labels in
+  v66 but not in v62; the template doesn't list them to stay portable.
 ---
 date:
   min_calbp: 2700
   max_calbp: 5000
 populations:
+  # v62.0 forms (with .AG / .SG suffixes)
   - Czechia_BellBeaker.AG
   - England_BellBeaker.AG
   - England_EBA_BellBeaker.AG
@@ -31,4 +40,13 @@ populations:
   - Czechia_EBA_Unetice.AG
   - Russia_Samara_EBA_Yamnaya.AG
   - Russia_Kalmykia_EBA_Yamnaya.SG
+  # v66.0 forms (suffix dropped)
+  - Czechia_BellBeaker
+  - England_BellBeaker
+  - France_BellBeaker
+  - Czechia_EBA_CordedWare
+  - Estonia_LN_CordedWare
+  - Czechia_EBA_Unetice
+  - Russia_Samara_EBA_Yamnaya
+  - Russia_Kalmykia_EBA_Yamnaya
 min_coverage: 0.3

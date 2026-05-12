@@ -66,7 +66,7 @@ def test_emit_template_is_byte_verbatim(tmp_path: Path) -> None:
     assert buf.getvalue() == src_content
     # Comments and the metadata block survive verbatim.
     assert "# Modern European populations" in buf.getvalue()
-    assert "tested_against: [v62.0]" in buf.getvalue()
+    assert "tested_against: [v62.0, v66.0]" in buf.getvalue()
 
 
 def test_emit_template_unknown_raises() -> None:
@@ -91,7 +91,7 @@ def test_cli_template_emit_to_stdout() -> None:
     """`aadr-subset template NAME` emits the YAML to stdout."""
     result = _run_cli("template", "modern_european")
     assert result.returncode == 0, result.stderr
-    assert "tested_against: [v62.0]" in result.stdout
+    assert "tested_against: [v62.0, v66.0]" in result.stdout
     assert "modern_only: true" in result.stdout
     # Comment-prefix lines survive (verbatim emit).
     assert "# Modern European populations" in result.stdout
@@ -102,7 +102,7 @@ def test_cli_template_emit_to_file(tmp_path: Path) -> None:
     result = _run_cli("template", "iron_age_britain", "-o", str(out))
     assert result.returncode == 0, result.stderr
     body = out.read_text(encoding="utf-8")
-    assert "tested_against: [v62.0]" in body
+    assert "tested_against: [v62.0, v66.0]" in body
     assert "England_IA.AG" in body
 
 

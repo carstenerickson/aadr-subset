@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (Day 10 — v66.0 template verification + README rewrite)
+
+Day-9 verified templates against v62.0 only. Day 10 extends the audit
+to AADR v66.0 (Mallick & Reich 2023) and rewrites the README around the
+five-subcommand surface that landed across Days 1-8.
+
+- **Every template now resolves on both v62.0 and v66.0.** AADR's
+  labeling convention changed substantially at v66: the `.AG` / `.SG` /
+  `.DG` / `.HO` suffixes were dropped for canonical labels, and several
+  large horizons (Germany_BellBeaker, Germany_CordedWare) were
+  fragmented into site-specific labels. Each template now lists both
+  v62 and v66 forms — unmatched literals are harmless to the OR-of-
+  literals match. Notable changes:
+  - `modern_european` lists `English.{DG,HO}` + bare `English` (and
+    same for French, Italian_North, Spanish, Norwegian, Finnish, Greek,
+    Russian). 493 matched in v62.0 → 570 in v66.0.
+  - `wsh_steppe_pool` adds the v66 names: `Russia_Samara_MBA_Poltavka`
+    (replaces v62's site-less `Russia_MBA_Poltavka.AG`),
+    `Russia_Eneolithic_Steppe` (region/period order reversed from
+    v62's `Russia_Steppe_Eneolithic.AG`).
+  - `neolithic_anatolia` retains v62 Barcin labels but adds v66's
+    consolidated `Turkey_Catalhoyuk_N` + `Turkey_N` — Barcin was
+    dropped from v66 HO (still in 1240K). 28 matched in v62 → 58 in
+    v66.
+  - `iron_age_britain` adds bare `England_IA` alongside the v62
+    `England_IA.AG` / `England_IA.SG`. 9 matched in v62 → 45 in v66.
+  - Every template's `tested_against:` bumped `[v62.0]` →
+    `[v62.0, v66.0]`.
+- **Integration test extended to both versions.** New parametrization
+  is `(version, template_name)` — 12 cells total. Each cell loads the
+  template, runs through `engine.select_samples` against the gated
+  release's `.anno`, and asserts `n_matched > 0`. Skips releases the
+  template doesn't claim (so a v62-only template doesn't fail the v66
+  cell — that's audit-pending, not broken).
+- **Two env vars** — `AADR_V62_ANNO_PATH` and `AADR_V66_ANNO_PATH`.
+  Each release is gated independently so contributors can run just the
+  versions they have on disk.
+- **README rewrite.** Was Day-1-stale ("Day 1 surface", "this README
+  will expand on Day 11"). New shape: opening 4-line example showing
+  the full select cycle, then "Why it exists" framing, install
+  instructions, one section per subcommand (validate, select, inspect,
+  report, template), exit-code table, selector-grammar overview, and
+  a plink2 composition snippet.
+
 ### Changed (Day 9 — verified template Group_ID literals against real v62.0)
 
 The Day-8 starter templates shipped with plausible-looking Group_ID

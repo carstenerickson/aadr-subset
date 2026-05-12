@@ -1,27 +1,32 @@
 # Modern European populations starter template.
 #
-# Verified against AADR v62.0. `.DG` = Reich shotgun-coverage call set;
-# `.HO` = HumanOrigins array genotypes. Modern samples in AADR
-# overwhelmingly carry one of these two suffixes; .SG is rare for
-# present-day individuals.
-tested_against: [v62.0]
+# Verified against AADR v62.0 + v66.0. AADR labeling convention changed
+# at v66.0: the .HO / .DG / .SG suffixes used in v62 were dropped for
+# modern reference populations (which carry no period qualifier).
+# This template lists both forms so it resolves cleanly against either
+# release.
+tested_against: [v62.0, v66.0]
 last_verified: '2026-05-12'
 maintainer: aadr-subset
 notes: |
-  Modern (post-1880 CE) Europe-broad reference set, intersecting both
-  the Reich shotgun-coverage (.DG) and HumanOrigins array (.HO) panels.
-  `modern_only: true` is the shorthand for date_calbp <= 70 — keeps
-  the filter explicit even though every label here is modern by
-  definition.
+  Modern (post-1880 CE) Europe-broad reference set, intersecting the
+  Reich shotgun-coverage / HumanOrigins panels. `modern_only: true` is
+  the shorthand for date_calbp <= 70 — keeps the filter explicit even
+  though every label here is modern by definition.
+
+  Labels with `.DG` / `.HO` suffixes apply to v62 and earlier; bare
+  labels apply to v66 (the suffix convention was dropped). Unmatched
+  literals are harmless to the engine — populations is an OR-of-
+  literals match.
 
   Notable absence: v62.0 has no top-level `Irish.HO`, `Swedish.HO`, or
-  `German.HO` — those populations are present in the corpus only via
-  ancient labels (e.g. `Sweden_Viking.SG`). For a Northern-European
-  modern reference, use `Norwegian.HO` + `Finnish.HO` as proxies for
-  Scandinavia and drop Sweden/Germany/Ireland from your list.
+  `German.HO` — those nations are present only via ancient labels in
+  v62. v66.0 likewise has no top-level `Irish` / `Swedish` / `German`.
+  Use `Norwegian` + `Finnish` as proxies for Scandinavia.
 ---
 modern_only: true
 populations:
+  # v62.0 forms (.DG = shotgun, .HO = HumanOrigins array)
   - English.DG
   - English.HO
   - French.DG
@@ -38,3 +43,13 @@ populations:
   - Greek.HO
   - Russian.DG
   - Russian.HO
+  # v66.0 forms (bare labels — suffix convention dropped)
+  - English
+  - French
+  - Italian_North
+  - Italian_South
+  - Spanish
+  - Norwegian
+  - Finnish
+  - Greek
+  - Russian

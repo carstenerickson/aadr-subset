@@ -1,39 +1,56 @@
 # Western Steppe Herder (WSH) pool starter template.
 #
-# Verified against AADR v62.0. Source pool for "WSH" / "Steppe"
-# ancestry in qpAdm-style modeling. AADR breaks Yamnaya out by
-# country/region: Russia_Samara, Russia_Kalmykia, Russia_Caucasus,
-# Bulgaria, Kazakhstan, Ukraine, Serbia, Hungary.
-tested_against: [v62.0]
+# Verified against AADR v62.0 + v66.0. AADR breaks Yamnaya / Poltavka /
+# Eneolithic-steppe out by country/region; suffix variants dropped at
+# v66. Both forms listed below.
+tested_against: [v62.0, v66.0]
 last_verified: '2026-05-12'
 maintainer: aadr-subset
 notes: |
   Classic distal-source pool for steppe ancestry: Yamnaya (Samara,
-  Kalmykia, Caucasus), Poltavka (Russia_MBA_Poltavka.AG), and the
-  Eneolithic-steppe / Caucasus-Eneolithic groups that precede Yamnaya
-  chronologically. The `any:` block lets each subgroup carry its own
-  appropriate date window — Eneolithic is older than Yamnaya, so
-  one universal range would either miss Eneolithic samples or stretch
-  too late for tight Yamnaya filtering.
+  Kalmykia, Caucasus), Poltavka, and the Eneolithic-steppe /
+  Caucasus-Eneolithic groups that precede Yamnaya chronologically. The
+  `any:` block lets each subgroup carry its own date window —
+  Eneolithic is older than Yamnaya, so one universal range would
+  either miss Eneolithic samples or stretch too late for tight Yamnaya
+  filtering.
+
+  v66 renamed `Russia_Steppe_Eneolithic` → `Russia_Eneolithic_Steppe`
+  (region/period order reversed). v66 also reshuffled
+  `Russia_MBA_Poltavka` to site-prefixed `Russia_Samara_MBA_Poltavka`
+  and `Russia_Chelyabinsk_MBA_Poltavka` variants. All forms listed.
 ---
 any:
   - populations:
+      # v62 forms
       - Russia_Samara_EBA_Yamnaya.AG
       - Russia_Kalmykia_EBA_Yamnaya.SG
       - Russia_Caucasus_EBA_Yamnaya.AG
       - Russia_Ishkinovka_EBA_Yamnaya.AG
       - Russia_Remontnoye_EBA_Yamnaya.SG
+      # v66 forms
+      - Russia_Samara_EBA_Yamnaya
+      - Russia_Kalmykia_EBA_Yamnaya
+      - Russia_EBA_Caucasus_Yamnaya
     date:
       min_calbp: 4500
       max_calbp: 5500
   - populations:
+      # v62 form
       - Russia_MBA_Poltavka.AG
+      # v66 site-prefixed forms
+      - Russia_Samara_MBA_Poltavka
+      - Russia_Chelyabinsk_MBA_Poltavka
     date:
       min_calbp: 4000
       max_calbp: 5000
   - populations:
+      # v62 forms
       - Russia_Steppe_Eneolithic.AG
       - Russia_Caucasus_Eneolithic.AG
+      # v66 forms (region/period order reversed for the Steppe label)
+      - Russia_Eneolithic_Steppe
+      - Russia_Caucasus_Eneolithic
     date:
       min_calbp: 5000
       max_calbp: 7000

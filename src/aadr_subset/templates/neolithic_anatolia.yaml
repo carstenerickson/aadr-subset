@@ -1,21 +1,28 @@
 # Neolithic Anatolia starter template (~9500-7000 calBP).
 #
-# Verified against AADR v62.0. AADR labels these as
-# `Turkey_{Region}_{Site}_N.{AG|SG|DG}`; there is no `Anatolia_N`
-# top-level label.
-tested_against: [v62.0]
+# Verified against AADR v62.0 + v66.0. v62 carries `Turkey_{Region}_
+# {Site}_N.{AG|SG|DG}`; v66 simplified to `Turkey_{Site}_{Period}` with
+# no suffix and consolidated `Turkey_N`. Barcin dropped from v66 HO
+# (still in 1240K).
+tested_against: [v62.0, v66.0]
 last_verified: '2026-05-12'
 maintainer: aadr-subset
 notes: |
   Early Neolithic Anatolian farmers — proximal source for the EEF
   (Early European Farmer) component that spread westward starting
-  ~8500 calBP. Useful as a qpAdm distal source. AADR breaks these out
-  by site: Catalhoyuk + TepecikCiftlik in Central Anatolia; Barcin,
-  Ilipinar (also spelled Illipinar in some rows), Kumtepe in the
-  Marmara region. Barcin has `.SG`, `.AG`, and `.DG` variants — all
-  are kept here so the cohort covers all three call sets.
+  ~8500 calBP. Useful as a qpAdm distal source.
+
+  v62 breaks these out by site: Barcin, Catalhoyuk, TepecikCiftlik,
+  Ilipinar, Kumtepe (Marmara region) + Central Anatolia variants.
+  v66 HO dropped the Barcin / Marmara breakdown entirely; only
+  Catalhoyuk + the consolidated `Turkey_N` labels remain. Both forms
+  listed — unmatched literals are harmless.
+
+  Pre-Catalhoyuk Aceramic Neolithic sites (Cayonu, Asikli) aren't
+  included; add them if your question reaches that deep.
 ---
 populations:
+  # v62 forms (Marmara region with .SG/.AG/.DG suffixes)
   - Turkey_Marmara_Barcin_N.SG
   - Turkey_Marmara_Barcin_N.AG
   - Turkey_Marmara_Barcin_N.DG
@@ -25,6 +32,12 @@ populations:
   - Turkey_Marmara_Kumtepe_N.SG
   - Turkey_Central_Catalhoyuk_N.SG
   - Turkey_Central_TepecikCiftlik_N.WGC.SG
+  # v66 forms (suffix-less; Marmara breakdown dropped from HO panel)
+  - Turkey_Catalhoyuk_N
+  - Turkey_Catalhoyuk_EN
+  - Turkey_Catalhoyuk_MN
+  - Turkey_Catalhoyuk_LN
+  - Turkey_N
 date:
   min_calbp: 7000
   max_calbp: 9500

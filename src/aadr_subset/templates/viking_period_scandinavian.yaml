@@ -1,42 +1,53 @@
 # Viking-period Scandinavian + diaspora starter template
 # (~1200-800 calBP / ~750-1150 CE).
 #
-# Verified against AADR v62.0. Labels follow
-# `{Country}_Viking.SG` (Margaryan et al. 2020 Nature panel).
-# EarlyViking and PreViking variants exist for some countries.
-tested_against: [v62.0]
+# Verified against AADR v62.0 + v66.0. v62 carries `.SG` suffix
+# (Margaryan et al. 2020 was shotgun); v66 dropped suffixes and
+# fragmented several diaspora locales into site-specific labels.
+tested_against: [v62.0, v66.0]
 last_verified: '2026-05-12'
 maintainer: aadr-subset
 notes: |
   Viking Age samples — Scandinavian homelands plus the diaspora
-  destinations (Iceland, England, Ireland, Scotland, Isle of Man,
-  Faroes, Poland, Russia). AADR labels all carry `.SG` (Margaryan
-  et al. 2020 was shotgun-sequenced).
+  destinations. v66 retained the country-level canonical Viking labels
+  (`Norway_Viking`, `Sweden_Viking`, `Denmark_Viking`, etc.) but
+  dropped some less-populated locales (Gotland, IsleOfMan, Faroes).
 
-  Pre-/Early-Viking transitional groups (Norway_North_Pre_Viking,
-  Sweden_EarlyViking, Estonia_EarlyViking, etc.) are NOT included —
-  add them in a second `any:` branch if you want the long transition
-  window. The two branches below split homeland vs diaspora because
-  diaspora samples sometimes carry slightly later median dates.
+  Pre-/Early-Viking transitional groups (`*_PreViking`, `*_EarlyViking`)
+  aren't included — add them in a third `any:` branch if you want the
+  long transition window. The two branches below split homeland vs
+  diaspora because diaspora samples sometimes carry slightly later
+  median dates.
 ---
 any:
   - populations:
+      # v62 + v66 — Scandinavian homelands
       - Norway_Viking.SG
       - Sweden_Viking.SG
       - Denmark_Viking.SG
-      - Gotland_Viking.SG
+      - Gotland_Viking.SG          # v62 only; dropped from v66 HO
+      - Norway_Viking
+      - Sweden_Viking
+      - Denmark_Viking
     date:
       min_calbp: 800
       max_calbp: 1300
   - populations:
+      # v62 + v66 — diaspora
       - Iceland_Viking.SG
       - England_Viking.SG
       - Ireland_Viking.SG
       - Scotland_Viking.SG
-      - IsleOfMan_Viking.SG
-      - Faroes_Viking.SG
+      - IsleOfMan_Viking.SG        # v62 only
+      - Faroes_Viking.SG           # v62 only
       - Russia_Viking.SG
       - Poland_Viking.SG
+      - Iceland_Viking
+      - England_Viking
+      - Ireland_Viking
+      - Scotland_Viking
+      - Russia_Viking
+      - Poland_Viking
     date:
       min_calbp: 800
       max_calbp: 1300
