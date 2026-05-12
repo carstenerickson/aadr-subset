@@ -1,4 +1,5 @@
-"""Selector loader + JSON-schema validator + semantic-constraint checker.
+"""Selector loader + JSON-schema validator + semantic-constraint checker
++ RFC 8785 JCS signature.
 
 Day 1 surface per LLD §3.3:
 - load_selector: top-level entry that takes a path/stream and returns
@@ -10,12 +11,15 @@ Day 1 surface per LLD §3.3:
 - load_individual_ids_source: newline-delimited ID file per HLD format spec.
 - format_validation_errors: render list[ValidationError] for stderr.
 
-compute_signature (RFC 8785 JCS) lands on Day 7 alongside the select
-subcommand; not needed by validate.
+Day 5 added:
+- compute_signature: RFC 8785 JCS canonical-form SHA-256 over selector intent,
+  for the `selector_signature` field on SubsetResult (HLD §Reproducibility,
+  LLD §3.3).
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib.resources
 import io
 import json
@@ -24,6 +28,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 import jsonschema
+import rfc8785
 import yaml
 from ruamel.yaml import YAML
 
@@ -638,6 +643,113 @@ def _build_selector(d: dict[str, Any], *, metadata: SelectorMetadata) -> Selecto
         exclude=exclude,
         metadata=metadata,
     )
+
+
+# --- Selector signature (RFC 8785 JCS over canonicalized intent) ---
+
+
+def compute_signature(selector: Selector, *, cli_coverage_column: str | None) -> str:
+    """SHA-256 over the RFC 8785 (JCS) canonical form of selector intent.
+
+    Per LLD §3.3 algorithm:
+      1. Build a plain dict from selector: scalar fields + flattened
+         exclude / date / any_branches.
+      2. Drop `individual_ids_source` (path is not signature-relevant;
+         the file's content is) and drop `individual_ids_from_source`
+         (folded into step 3).
+      3. Union YAML-inlined + source-file IDs (sorted, deduped); set
+         the dict's `individual_ids` to that union when non-empty.
+      4. If selector.coverage_column is None AND cli_coverage_column is
+         not None: inject coverage_column=cli_coverage_column. Selector
+         wins; this is the CLI-fallback inclusion per HLD §Coverage.
+      5. Drop the metadata block (cohort-irrelevant prose).
+      6. rfc8785.dumps for JCS canonicalization.
+      7. Return "sha256:" + hexdigest.
+
+    Pure function. Same selector + same coverage env → same hash regardless
+    of YAML key ordering or list internal order (lists that are order-
+    sensitive — e.g., `any_branches` — keep their order; lists that are
+    set-like — `individual_ids`, `populations`, exclude lists — get sorted
+    here to break user-input ordering noise).
+    """
+    payload: dict[str, Any] = {}
+
+    # Top-level set-like ID lists: dedup + sort.
+    if selector.populations:
+        payload["populations"] = sorted(set(selector.populations))
+
+    union_ids = sorted(set(selector.individual_ids) | set(selector.individual_ids_from_source))
+    if union_ids:
+        payload["individual_ids"] = union_ids
+
+    if selector.modern_only is not None:
+        payload["modern_only"] = selector.modern_only
+
+    if selector.min_coverage is not None:
+        payload["min_coverage"] = selector.min_coverage
+
+    # coverage_column: selector wins; fall back to CLI value (step 4).
+    effective_coverage_column = selector.coverage_column or cli_coverage_column
+    if effective_coverage_column is not None:
+        payload["coverage_column"] = effective_coverage_column
+
+    if selector.date is not None:
+        date_dict: dict[str, int] = {}
+        if selector.date.min_calbp is not None:
+            date_dict["min_calbp"] = selector.date.min_calbp
+        if selector.date.max_calbp is not None:
+            date_dict["max_calbp"] = selector.date.max_calbp
+        if date_dict:
+            payload["date"] = date_dict
+
+    if selector.source_version is not None:
+        payload["source_version"] = selector.source_version
+    if selector.resolve_to_version is not None:
+        payload["resolve_to_version"] = selector.resolve_to_version
+
+    if selector.any_branches:
+        # any_branches order matters (HLD: branches are indexed in
+        # per_branch_counts as any[0], any[1], ...).
+        payload["any"] = [_canonical_any_branch(b) for b in selector.any_branches]
+
+    if selector.exclude is not None:
+        ex_dict: dict[str, list[str]] = {}
+        if selector.exclude.group_ids:
+            ex_dict["group_ids"] = sorted(set(selector.exclude.group_ids))
+        if selector.exclude.individual_ids:
+            ex_dict["individual_ids"] = sorted(set(selector.exclude.individual_ids))
+        if ex_dict:
+            payload["exclude"] = ex_dict
+
+    body = rfc8785.dumps(payload)
+    digest = hashlib.sha256(body).hexdigest()
+    return f"sha256:{digest}"
+
+
+def _canonical_any_branch(branch: AnyBranch) -> dict[str, Any]:
+    """Branch dict for JCS serialization. Same canonicalization rules as
+    top-level: drop `individual_ids_source` (path); set-like ID lists
+    sorted+deduped; absent (None / []) fields omitted."""
+    b: dict[str, Any] = {}
+    if branch.populations:
+        b["populations"] = sorted(set(branch.populations))
+    if branch.individual_ids:
+        b["individual_ids"] = sorted(set(branch.individual_ids))
+    if branch.modern_only is not None:
+        b["modern_only"] = branch.modern_only
+    if branch.min_coverage is not None:
+        b["min_coverage"] = branch.min_coverage
+    if branch.coverage_column is not None:
+        b["coverage_column"] = branch.coverage_column
+    if branch.date is not None:
+        d: dict[str, int] = {}
+        if branch.date.min_calbp is not None:
+            d["min_calbp"] = branch.date.min_calbp
+        if branch.date.max_calbp is not None:
+            d["max_calbp"] = branch.date.max_calbp
+        if d:
+            b["date"] = d
+    return b
 
 
 # --- ValidationError formatting ---

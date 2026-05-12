@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Day 5 — selector signature + report subcommand)
+
+Reproducibility primitive (selector signature) and the third output
+surface (`report` per-population aggregates) both land. `select` and
+`inspect` now populate `selector_signature` on every result; `report`
+emits per-group TSV / JSON aggregates with date + coverage stats.
+
+- **`selector.compute_signature(selector, *, cli_coverage_column)`** —
+  SHA-256 over the RFC 8785 (JCS) canonical form of selector intent.
+  Returns `"sha256:" + hexdigest`. Canonicalization rules per LLD §3.3:
+  YAML-inlined + file-loaded `individual_ids` unioned (sorted, deduped);
+  `populations` and `exclude.{group_ids,individual_ids}` deduped and
+  sorted; `individual_ids_source` path dropped (file *content* is the
+  signature input, not the path); `any_branches` order preserved
+  (they're indexed by `any[i]`); metadata block stripped; CLI
+  `--coverage-column` injected only when the selector itself doesn't
+  set `coverage_column:` (selector wins per HLD §Coverage handling).
+  Pure function — same selector + same coverage env produces the same
+  hash regardless of YAML key ordering or list internal order.
+- **Wired into `run_select` + `run_inspect`** — both populate
+  `SubsetResult.selector_signature` before returning. JSON output now
+  emits the real hash; `format_stdout_summary` shows the short form
+  (`sha256:abcdefg...hijklmn`) in the header; `format_inspect_summary`
+  shows the full hash as its trailing line.
+- **`reporting.write_report_tsv`** — 7-column TSV (`group_id`,
+  `n_matched`, `n_in_anno`, `pct_matched`, `date_min_calbp`,
+  `date_max_calbp`, `coverage_median`). `pct_matched` rendered to 1
+  decimal place via `f"{pct*100:.1f}"`; no `%` suffix in cells.
+  Date / coverage aggregates computed over MATCHED rows only.
+  `include_empty_groups=False` (the default) emits only rows where
+  `n_matched > 0`; `=True` additionally emits all other groups present
+  in `.anno` with zero-filled counts (population-survey workflows).
+- **`reporting.write_report_json`** — structured JSON; top-level keys
+  `selector_signature`, `anno_version`, `schema_version`,
+  `aadr_subset_version`, `populations[]`. Per-population entries:
+  `group_id`, `n_matched`, `n_in_anno`, `pct_matched`,
+  `date_min_calbp`, `date_max_calbp`, `coverage_median`,
+  `coverage_min`, `coverage_max`. `pct_matched` is a fraction (0.0-1.0),
+  NOT rendered like the TSV — JSON consumers do their own formatting.
+- **`commands/report_cmd.run_report`** — orchestrator parallel to
+  `run_select`: load selector → load AnnoFrame → compute signature →
+  engine eval → zero-match `--allow-empty` gate → run-env metadata →
+  write report. Stdout summary is intentionally a single line
+  (`Wrote report.tsv (4 populations, 287 samples) in 0.12s.`) — no
+  parse/eval/write breakdown like select.
+- **CLI**: new `report SELECTOR ANNO` subcommand with `--format tsv|json`
+  (default `tsv`), `-o/--out`, `--schema-override`, `--allow-empty`,
+  `--allow-empty-source`, `--include-empty-groups`.
+
 ### Added (Day 4 — inspect mode + tsv/json output formats + stdout summary)
 
 Output surface filled out: `select` gains `--format tsv` / `--format json`

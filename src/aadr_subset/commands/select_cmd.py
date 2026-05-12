@@ -27,7 +27,7 @@ from ..errors import (
 )
 from ..formats import write_select_output
 from ..reporting import format_stdout_summary
-from ..selector import load_selector
+from ..selector import compute_signature, load_selector
 from ..types import OutputFormat, Selector
 
 
@@ -109,15 +109,20 @@ def run_select(
             "Pass --allow-empty for a sentinel-file write."
         )
 
-    # 5. Populate run-env metadata on the result.
+    # 5. Compute selector signature (LLD §3.3 / §4.1 step 5). cli_coverage_column
+    # is None until the --coverage-column flag lands; selector.coverage_column
+    # alone determines the signature contribution today.
+    sig = compute_signature(selector, cli_coverage_column=None)
+
+    # 6. Populate run-env metadata on the result.
     result = replace(
         result,
         anno_file=str(anno_path),
         anno_version=anno.version,
         schema_class=anno.schema_class.value,
         selector_file=selector_path,
-        # selector_signature lands Day 7.
-        # coverage_column_used lands Day 3 with the coverage filter.
+        selector_signature=sig,
+        # coverage_column_used lands with the --coverage-column flag.
     )
 
     # 6. Write output (TSV / JSON / IDs via formats.py dispatcher).

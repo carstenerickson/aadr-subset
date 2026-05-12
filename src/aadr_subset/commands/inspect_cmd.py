@@ -18,7 +18,7 @@ import aadr_resolve
 from ..engine import select_samples
 from ..errors import EXIT_SUCCESS, IOFailure, UsageError, ValidationError
 from ..reporting import format_inspect_summary
-from ..selector import load_selector
+from ..selector import compute_signature, load_selector
 
 
 def run_inspect(
@@ -71,13 +71,17 @@ def run_inspect(
         include_matched_criteria=True,
     )
 
-    # 4. Populate run-env metadata.
+    # 4. Compute signature + populate run-env metadata. cli_coverage_column
+    # is None until --coverage-column ships; selector.coverage_column alone
+    # drives the signature today.
+    sig = compute_signature(selector, cli_coverage_column=None)
     result = replace(
         result,
         anno_file=str(anno_path),
         anno_version=anno.version,
         schema_class=anno.schema_class.value,
         selector_file=selector_path,
+        selector_signature=sig,
     )
 
     # 5. Print inspect summary to STDOUT.

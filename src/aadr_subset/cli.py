@@ -16,6 +16,7 @@ import click
 
 from . import __version__
 from .commands.inspect_cmd import run_inspect
+from .commands.report_cmd import run_report
 from .commands.select_cmd import run_select
 from .commands.validate_cmd import run_validate
 from .errors import EXIT_UNEXPECTED, AadrSubsetError, UsageError
@@ -177,6 +178,75 @@ def inspect_command(
         schema_override=schema_override,
         allow_empty_source=allow_empty_source,
         strict_resolve=strict_resolve,
+        quiet=ctx.obj["quiet"],
+    )
+    sys.exit(exit_code)
+
+
+@cli.command("report")
+@click.argument("selector_path", type=click.STRING)
+@click.argument("anno_path", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "-o",
+    "--out",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Output file path (default: stdout).",
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["tsv", "json"]),
+    default="tsv",
+    show_default=True,
+    help="Report format. `tsv`=per-group columns; `json`=structured object.",
+)
+@click.option(
+    "--schema-override",
+    type=click.Choice(["A", "B", "C", "D", "E"]),
+    default=None,
+    help="Force AnnoFrame schema class (A-E).",
+)
+@click.option(
+    "--allow-empty",
+    is_flag=True,
+    help="Downgrade zero-match exit 1 to exit 0 (write a header-only report).",
+)
+@click.option(
+    "--allow-empty-source",
+    is_flag=True,
+    help="Allow individual_ids_source to be empty.",
+)
+@click.option(
+    "--include-empty-groups",
+    is_flag=True,
+    help="Include rows for .anno groups with zero matches (n_matched=0). "
+    "Useful for population-survey workflows.",
+)
+@click.pass_context
+def report_command(
+    ctx: click.Context,
+    selector_path: str,
+    anno_path: str,
+    out: str | None,
+    fmt: str,
+    schema_override: str | None,
+    allow_empty: bool,
+    allow_empty_source: bool,
+    include_empty_groups: bool,
+) -> None:
+    """Per-population aggregate output: group_id, n_matched, n_in_anno,
+    pct_matched, date_min/max_calbp, coverage_median (+ JSON adds
+    coverage_min/max). Atomic write."""
+    exit_code = run_report(
+        selector_path=selector_path,
+        anno_path=anno_path,
+        out=out,
+        fmt=fmt,
+        schema_override=schema_override,
+        allow_empty=allow_empty,
+        allow_empty_source=allow_empty_source,
+        include_empty_groups=include_empty_groups,
         quiet=ctx.obj["quiet"],
     )
     sys.exit(exit_code)
