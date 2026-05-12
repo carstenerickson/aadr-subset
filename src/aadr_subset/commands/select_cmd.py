@@ -27,7 +27,7 @@ from ..errors import (
 )
 from ..formats import write_ids
 from ..selector import load_selector
-from ..types import SubsetResult
+from ..types import Selector, SubsetResult
 
 
 def run_select(
@@ -84,7 +84,14 @@ def run_select(
     t_parse_end = time.monotonic()
     parse_time = t_parse_end - t_parse_start
 
-    # 3. Engine evaluation (timed).
+    # 3. v62 class-D coverage warning (HLD §Coverage handling). Fires when
+    # the selector touches min_coverage AND target .anno is class D
+    # (v62.0; no native coverage column) AND no override flag is set.
+    # The --coverage-column / --coverage-derive opt-in lands later; until
+    # then this warning is informational only.
+    _emit_v62_coverage_warning_if_needed(anno, selector)
+
+    # 4. Engine evaluation (timed).
     t_eval_start = time.monotonic()
     result = select_samples(
         anno,
@@ -132,6 +139,30 @@ def run_select(
         )
 
     return EXIT_SUCCESS
+
+
+def _emit_v62_coverage_warning_if_needed(anno: aadr_resolve.AnnoFrame, selector: Selector) -> None:
+    """Class-D inputs (v62.0; no native coverage column) cause min_coverage
+    filters to silently produce empty results unless a derived proxy is
+    opted in. Emit a stderr WARNING when this combination is detected.
+
+    Per HLD §Coverage handling. Check uses schema_class (canonical) rather
+    than af.version (which depends on aadr-resolve's filename inference and
+    is fragile in tests). The --coverage-derive / --coverage-column
+    opt-in lands later; this warning is informational until then.
+    """
+    if anno.schema_class.value != "D":
+        return
+    selector_has_min_coverage = selector.min_coverage is not None or any(
+        b.min_coverage is not None for b in selector.any_branches
+    )
+    if not selector_has_min_coverage:
+        return
+    sys.stderr.write(
+        "WARNING: v62.0 input has no native coverage column; min_coverage "
+        "filter selects nothing. Use `--coverage-derive snps_hit_1240k` "
+        "(pending CLI flag) for a derived proxy.\n"
+    )
 
 
 def _parse_schema_override(value: str | None):  # type: ignore[no-untyped-def]

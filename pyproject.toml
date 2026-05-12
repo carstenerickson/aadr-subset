@@ -72,6 +72,10 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "RUF"]
+# RUF003: ambiguous-unicode-in-comment. We intentionally use ∪ / × etc. for
+# set-theory and matrix notation in test/code comments — these are clearer
+# than the ASCII equivalents and don't affect runtime behavior.
+ignore = ["RUF003"]
 
 [tool.mypy]
 python_version = "3.11"

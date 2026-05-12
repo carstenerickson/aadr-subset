@@ -106,6 +106,88 @@ def _value_for_field(name: str, row: SynthRow) -> str:
     return row.extra.get(name, "")
 
 
+def write_class_d_anno(out_path: Path, rows: list[SynthRow]) -> Path:
+    """Synthesize a class-D (v62.0) .anno file. Class D has no native
+    coverage column — used by the v62 coverage-warning regression test.
+
+    Detection signature: col_0_normalized=genetic_id,
+    col_1_normalized=master_id (NOT individual_id; the v66 rename
+    landed at class E).
+    """
+    schema_text = (
+        importlib.resources.files("aadr_resolve") / "schemas" / "class_D.yaml"
+    ).read_text(encoding="utf-8")
+    schema: dict[str, Any] = yaml.safe_load(schema_text)
+
+    n_columns: int = schema["n_columns"]
+    fields_by_column: dict[int, dict[str, Any]] = {}
+    for name, info in schema["fields"].items():
+        fields_by_column[info["column"]] = {"name": name, **info}
+
+    header_row: list[str] = []
+    for col_idx in range(1, n_columns + 1):
+        info = fields_by_column.get(col_idx)
+        header_row.append(info["display_header"] if info else f"unmapped_{col_idx}")
+
+    lines = ["\t".join(header_row)]
+    for row in rows:
+        cells = [""] * n_columns
+        for col_idx in range(1, n_columns + 1):
+            info = fields_by_column.get(col_idx)
+            if info is None:
+                continue
+            name = info["name"]
+            cells[col_idx - 1] = _value_for_field(name, row)
+        lines.append("\t".join(cells))
+
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out_path
+
+
+def make_v62_class_d_fixture(out_path: Path) -> Path:
+    """4-sample class-D (v62.0) fixture. No coverage column natively —
+    designed to exercise the class-D coverage-warning path."""
+    rows = [
+        SynthRow(
+            genetic_id="I0001.AG",
+            individual_id="Loschbour",
+            group_id="Western_HG",
+            date_calbp=8000,
+            snps_hit_1240k=1_120_000,
+            sex="M",
+            country="Luxembourg",
+        ),
+        SynthRow(
+            genetic_id="Loschbour.DG",
+            individual_id="Loschbour",
+            group_id="Western_HG",
+            date_calbp=8000,
+            snps_hit_1240k=987_000,
+            sex="M",
+            country="Luxembourg",
+        ),
+        SynthRow(
+            genetic_id="Bichon",
+            individual_id="Bichon",
+            group_id="Western_HG",
+            date_calbp=13700,
+            snps_hit_1240k=965_000,
+            sex="M",
+            country="Switzerland",
+        ),
+        SynthRow(
+            genetic_id="KO1",
+            individual_id="KO1",
+            group_id="Eastern_HG",
+            date_calbp=7700,
+            snps_hit_1240k=1_148_000,
+            sex="M",
+            country="Hungary",
+        ),
+    ]
+    return write_class_d_anno(out_path, rows)
+
+
 def make_loschbour_v66_fixture(out_path: Path) -> Path:
     """6-sample class-E fixture: Loschbour x2 + Bichon + KO1 + English x2.
 

@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (Day 3 — any:/exclude: combinators + date/modern_only/min_coverage)
+
+Selector evaluation algorithm wired end-to-end (HLD §Selector evaluation
+algorithm). Feature gate shrinks: `any:`, `exclude:`, `date:`,
+`modern_only:`, `min_coverage:` all now execute. Remaining gated:
+`coverage_column:` (pending --coverage-column CLI flag) and cross-version
+(`source_version:` + `resolve_to_version:`; Day 6).
+
+- **Top-level AND mask** now includes `date.min_calbp` / `date.max_calbp`,
+  `modern_only: true` (shorthand for `date_calbp <= 70`, per HLD §Modern
+  vs ancient detection), and `min_coverage:` (NaN coverage FAILS the
+  threshold per HLD §Coverage handling).
+- **`any:` OR-block** — list of branches; each branch is a full
+  AND-predicate evaluated against the AnnoFrame; branch masks OR-
+  combined. Branch-internal `individual_ids_source:` loading deferred
+  to v0.2 (no current use case; schema allows the key but engine
+  treats branch-source as empty).
+- **`exclude:` NOT-of-OR block** — per-condition OR over
+  `exclude.group_ids` + `exclude.individual_ids`; final mask is
+  top_and AND any_or AND NOT(exclude_or). `excluded_counts` populated
+  with one ExcludeCount per excluded literal (per HLD v4b list-of-
+  objects form).
+- **`per_branch_counts`** populated: `top_level` + `any[0]` /
+  `any[1]` / ... keys, each counting that branch's CONTRIBUTION to
+  the final result (intersection with top_and + exclude_keep), not
+  the branch's gross mask. Per HLD pin.
+- **v62 class-D coverage warning** wired in `commands/select_cmd.py`:
+  when target `.anno` is class D (no native coverage column) AND
+  selector contains `min_coverage:` (at top level or any: branch),
+  stderr WARNING points at the `--coverage-derive snps_hit_1240k`
+  opt-in (pending CLI flag). Check uses `af.schema_class.value == "D"`
+  (canonical) rather than `af.version` (fragile against test-fixture
+  filename inference).
+
+### Tests (Day 3)
+
+- 19 new engine unit tests (47 total): modern_only boundary, date
+  range (single + both bounds), min_coverage threshold + NaN
+  semantics, flat AND combining populations + date + coverage,
+  any:-block (3-branch, dedup, per-branch counts), exclude:
+  (group_ids, individual_ids, per-literal excluded_counts), complex
+  AND+OR+NOT compound selector.
+- 9 new select-CLI integration tests via subprocess covering each
+  Day-3 feature end-to-end + v62 class-D coverage-warning regression
+  + still-gated coverage_column feature.
+- New `make_v62_class_d_fixture` synthesizer for class-D `.anno`
+  fixtures (4-sample Loschbour-style v62.0).
+
+HLD test coverage update:
+- Test 1 (empty selector) — covered Day 2.
+- Test 2 (single-population) — covered Day 2.
+- Test 3 (flat AND) — covered Day 3.
+- Test 4 (any: OR 3-branch) — covered Day 3.
+- Test 5 (exclude: NOT) — covered Day 3.
+- Test 6 (nested any: rejected) — covered Day 1 (schema).
+- Test 12 (modern_only boundary at 70) — covered Day 3.
+- Test 13 (NaN coverage fails threshold) — covered Day 3.
+
+Local CI: 95 tests pass, ruff + format + mypy clean, coverage 93%.
+
+### Deferred to later days
+
+- Day 4: inspect mode; TSV and JSON output formats.
+- Day 5: tests 1-14 + 23-27 + 30 (file format edge cases, signature
+  canonicalization, etc.).
+- Day 6: cross-version (`resolve_to_version:` + `--source-anno`);
+  `--coverage-column` / `--coverage-derive` CLI flags.
+- Day 7: selector_signature (RFC 8785 JCS).
+- Day 8: templates + template subcommand.
+
 ### Added (Day 2 — aadr-resolve library integration + basic select)
 
 - `aadr-subset select SELECTOR ANNO [-o OUT]` subcommand end-to-end.
