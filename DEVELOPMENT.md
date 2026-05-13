@@ -17,24 +17,28 @@ output formats, cross-version lifts, sampling caps) hangs off this core.
 
 ## 30-second mental model
 
+```mermaid
+flowchart LR
+  yaml["YAML selector"] --> load["selector.load_selector"]
+  anno[".anno file"] --> annof["aadr_resolve.AnnoFrame.from_path"]
+
+  load --> Selector["Selector<br/>(dataclass)"]
+  annof --> AnnoFrame["AnnoFrame"]
+
+  Selector --> sig["selector.compute_signature<br/>(RFC 8785 JCS SHA-256)"]
+  Selector --> engine["engine.select_samples"]
+  AnnoFrame --> engine
+
+  engine --> result["SubsetResult<br/>(dataclass)"]
+  sig -. signature attached post-engine .-> result
+
+  result --> formats["formats.py<br/>write_ids / write_tsv / write_json"]
+  result --> reporting["reporting.py<br/>human summaries +<br/>write_report_* / write_diff_json"]
 ```
-YAML selector ──► selector.load_selector ──► Selector (dataclass)
-                                                  │
-.anno file ──► aadr_resolve.AnnoFrame.from_path ──┤
-                                                  ▼
-                                    engine.select_samples
-                                                  │
-                                                  ▼
-                                        SubsetResult (dataclass)
-                                                  │
-                                ┌─────────────────┼─────────────────┐
-                                ▼                 ▼                 ▼
-                         formats.py        reporting.py     selector.compute_signature
-                         (write_ids /      (human summaries     (RFC 8785 JCS
-                          write_tsv /       to stderr +          SHA-256)
-                          write_json)       write_report_* /
-                                            write_diff_json)
-```
+
+`compute_signature` reads the `Selector` directly (not the
+`SubsetResult`); `run_select` attaches the resulting hash to the
+result via `dataclasses.replace` before handing it to the writers.
 
 Three things to internalize:
 
@@ -71,9 +75,61 @@ Three things to internalize:
 | `commands/{validate,select,inspect,report,diff,template}_cmd.py` | One orchestrator per subcommand. Each `run_*` takes flat kwargs and returns an int exit code. | ~40-390 each |
 
 The dep graph is acyclic. `types.py` and `errors.py` are leaves;
-`selector.py` and `engine.py` depend only on those two; `formats.py`
-and `reporting.py` depend on the data layer plus `aadr_resolve`;
-`commands/*` depend on everything and are imported only by `cli.py`.
+`selector.py` and `engine.py` depend only on those two (plus
+`aadr_resolve` for `engine`); `formats.py` and `reporting.py` depend
+on the data layer plus `aadr_resolve`; `commands/*` depend on
+everything and are imported only by `cli.py`.
+
+```mermaid
+graph TD
+  cli[cli.py]
+  commands["commands/*_cmd.py"]
+  formats[formats.py]
+  reporting[reporting.py]
+  templates[templates.py]
+  selector[selector.py]
+  engine[engine.py]
+  types[types.py]
+  errors[errors.py]
+  schema[("schemas/<br/>selector.schema.json")]
+  aadr_resolve(["aadr_resolve<br/>(external PyPI dep)"])
+
+  cli --> commands
+  cli --> errors
+
+  commands --> selector
+  commands --> engine
+  commands --> formats
+  commands --> reporting
+  commands --> templates
+  commands --> errors
+
+  selector --> types
+  selector --> errors
+  selector --> schema
+
+  engine --> types
+  engine --> errors
+  engine --> aadr_resolve
+
+  templates --> types
+
+  formats --> types
+  formats --> errors
+  formats --> aadr_resolve
+
+  reporting --> types
+  reporting --> aadr_resolve
+
+  classDef external fill:#eef,stroke:#88a,stroke-dasharray:5 3
+  class aadr_resolve external
+  classDef data fill:#fff8dd,stroke:#aa9
+  class schema data
+```
+
+Arrows point from importer to imported. Reading top-down: `cli.py`
+sits above the orchestrators, which sit above the data/output layer,
+which sits on the leaves. No cycles.
 
 ## The execution pipeline (engine.select_samples)
 
@@ -82,6 +138,37 @@ commented). Step numbering below matches the `# N.` comments in the
 code; v0.3 inserted sampling between the pre-sampling mask and the
 materialize step as **step 4b** so existing pin numbers (5+ in the
 code) didn't shift.
+
+```mermaid
+flowchart TD
+  start([Selector + AnnoFrame])
+  start --> q0{resolve_to_version<br/>set?}
+  q0 -->|yes| s0["0. Cross-version IID lift<br/>via aadr_resolve.resolve_master_ids"]
+  q0 -->|no| s1
+  s0 --> s1
+
+  s1["1. top_and_mask =<br/>AND of predicates"] --> s2["2. any_or_mask =<br/>OR of branches<br/>(all-True if absent)"]
+  s2 --> s3["3. exclude_keep_mask =<br/>NOT of exclude conditions"]
+  s3 --> s4["4. candidates_mask =<br/>top_and & any_or & exclude_keep"]
+  s4 --> q4b{sampling<br/>spec set?}
+  q4b -->|yes| s4b["4b. _apply_sampling<br/>per-IID cap → per-pop cap"]
+  q4b -->|no| fm["final_mask = candidates_mask"]
+  s4b --> fm2["final_mask = reduced"]
+
+  fm --> acct
+  fm2 --> acct
+  acct["5–9. Materialize + dedup;<br/>per-population, per-branch,<br/>excluded counts;<br/>(optional) matched_criteria"]
+  acct --> result([SubsetResult])
+
+  classDef optional fill:#fff8dd,stroke:#aa9
+  class q0,s0,q4b,s4b optional
+```
+
+The two yellow conditionals are the only branching: the cross-version
+IID lift fires only when `resolve_to_version:` is in the selector, and
+the sampling reduction fires only when a sampling spec (selector-side
+or via CLI) is present. The masks chain (steps 1–4) and the accounting
+block (5–9) always run.
 
 0. **Cross-version IID lift** — if `selector.resolve_to_version` is set,
    call `aadr_resolve.resolve_master_ids` to lift the selector's source
