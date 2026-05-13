@@ -90,6 +90,25 @@ def test_signature_individual_ids_union_from_source(tmp_path: Path) -> None:
     )
 
 
+def test_signature_branch_individual_ids_union_from_source(tmp_path: Path) -> None:
+    """v0.2: branch individual_ids_source contributes the same way as
+    top-level — file content enters the canonical form, path does not."""
+    src = _write(tmp_path / "branch_ids.txt", "I1\nI2\n")
+    a = _write(
+        tmp_path / "a.yaml",
+        "any:\n  - individual_ids: [I1, I2]\n",
+    )
+    b = _write(
+        tmp_path / "b.yaml",
+        f"any:\n  - individual_ids_source: {src.name}\n",
+    )
+    _, sa = load_selector(a)
+    _, sb = load_selector(b)
+    assert compute_signature(sa, cli_coverage_column=None) == compute_signature(
+        sb, cli_coverage_column=None
+    )
+
+
 def test_signature_individual_ids_source_path_not_significant(tmp_path: Path) -> None:
     """Renaming the source file (same content) doesn't change the signature."""
     src1 = _write(tmp_path / "ids1.txt", "I1\nI2\n")

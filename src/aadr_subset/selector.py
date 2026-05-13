@@ -138,16 +138,15 @@ def load_selector(
             f"(got {type(selector_dict).__name__})",
         )
 
-    # Resolve deprecated aliases (rewrites the dict in place; collects warnings).
-    selector_dict, alias_warnings = _resolve_deprecated_aliases(
+    # v0.2: master_ids / master_ids_source are removed (were deprecated
+    # aliases in v0.1 with warn-and-rewrite). Detect any occurrence and
+    # surface as a ValidationError; the rest of the validation pipeline
+    # still runs so the user sees every issue in one pass.
+    removed_alias_errors = _check_removed_aliases(
         selector_dict,
         source_label=source_label,
         raw_text=raw_text,
     )
-
-    # Surface deprecation warnings to stderr immediately (per HLD).
-    for warning in alias_warnings:
-        sys.stderr.write(warning.format_line() + "\n")
 
     # Schema validation.
     schema_errors = _validate_schema(
@@ -166,19 +165,24 @@ def load_selector(
         schema_errors=schema_errors,
     )
 
-    all_errors = schema_errors + semantic_errors
+    all_errors = removed_alias_errors + schema_errors + semantic_errors
 
-    if all_errors and not collect_all_errors:
-        # Fail fast: raise on first batch of errors.
-        raise UsageError(errors=all_errors)
-    if all_errors and collect_all_errors:
+    if all_errors:
+        # Fail fast unless caller is collecting (validate subcommand wants
+        # every error in one pass); behavior is the same — UsageError
+        # either way — but documented for clarity.
         raise UsageError(errors=all_errors)
 
     # Parse metadata + selector dataclasses.
     metadata = _parse_metadata(metadata_dict, source_label=source_label)
     selector = _build_selector(selector_dict, metadata=metadata)
 
-    # Load individual_ids_source file content if present.
+    # Load individual_ids_source files (top-level + each any: branch).
+    # AnyBranch and Selector are both frozen, so we rebuild via
+    # dataclasses.replace. v0.2 extends top-level-only loading from v0.1
+    # to also recurse into branches per HLD §Selector grammar semantics.
+    from dataclasses import replace
+
     if selector.individual_ids_source is not None:
         from_source = _load_individual_ids_source(
             selector.individual_ids_source,
@@ -186,10 +190,22 @@ def load_selector(
             allow_empty=allow_empty_source,
             source_label=source_label,
         )
-        # Replace via dataclass replace (Selector is frozen).
-        from dataclasses import replace
-
         selector = replace(selector, individual_ids_from_source=from_source)
+
+    if selector.any_branches:
+        new_branches: list[AnyBranch] = []
+        for i, branch in enumerate(selector.any_branches):
+            if branch.individual_ids_source is not None:
+                branch_ids = _load_individual_ids_source(
+                    branch.individual_ids_source,
+                    base_dir=base_dir,
+                    allow_empty=allow_empty_source,
+                    source_label=f"{source_label} (any[{i}])",
+                )
+                new_branches.append(replace(branch, individual_ids_from_source=branch_ids))
+            else:
+                new_branches.append(branch)
+        selector = replace(selector, any_branches=new_branches)
 
     return metadata, selector
 
@@ -266,105 +282,66 @@ def _load_yaml_documents(raw_text: str, *, source_label: str) -> list[Any]:
     return docs
 
 
-# --- Deprecated alias resolution ---
+# --- Removed-key detection (v0.2: master_ids / master_ids_source are errors) ---
 
 
-def _resolve_deprecated_aliases(
+def _check_removed_aliases(
     d: dict[str, Any],
     *,
     source_label: str,
     raw_text: str,
-) -> tuple[dict[str, Any], list[ValidationError]]:
-    """Rewrite master_ids / master_ids_source → individual_ids /
-    individual_ids_source at top level AND inside any: branches. Collect
-    WARNING-severity ValidationError per occurrence.
+) -> list[ValidationError]:
+    """Detect occurrences of `master_ids` / `master_ids_source` and return
+    a ValidationError per occurrence with a renamed-in message.
 
-    Raises UsageError immediately if BOTH canonical and deprecated alias
-    are present for the same concept (defense-in-depth; schema also
-    enforces via cross-key constraint).
+    v0.1 accepted these as deprecated aliases (warn + rewrite). v0.2
+    removes them: any selector still using `master_ids:` /
+    `master_ids_source:` errors out at exit 4. Errors are collected at
+    every occurrence (top-level + each any: branch) so the user sees
+    every site to fix in one pass.
     """
-    warnings: list[ValidationError] = []
-    rewritten = dict(d)  # shallow copy; mutates in place below
+    errors: list[ValidationError] = []
 
-    # Top-level conflict check.
     for old_key, new_key in _DEPRECATED_ALIASES.items():
-        if old_key in rewritten and new_key in rewritten:
-            raise UsageError(
-                errors=[
-                    ValidationError(
-                        file=source_label,
-                        line=1,
-                        col=1,
-                        pointer="/",
-                        message=(
-                            f"cannot specify both '{new_key}' and '{old_key}' "
-                            f"(deprecated alias for the same concept)"
-                        ),
-                        constraint="canonical_and_deprecated_alias_both_set",
-                    )
-                ],
-            )
-
-    # Top-level rewrite.
-    for old_key, new_key in _DEPRECATED_ALIASES.items():
-        if old_key in rewritten:
+        if old_key in d:
             line, col = _locate_node(raw_text, [old_key])
-            warnings.append(
+            errors.append(
                 ValidationError(
                     file=source_label,
                     line=line,
                     col=col,
                     pointer=f"/{old_key}",
-                    message=(f"'{old_key}' is deprecated; use '{new_key}' (removed in v0.2)"),
-                    severity="WARNING",
+                    message=(
+                        f"'{old_key}' was a deprecated alias in v0.1 and is removed "
+                        f"in v0.2; use '{new_key}' instead."
+                    ),
+                    constraint="removed_deprecated_alias",
                 )
             )
-            rewritten[new_key] = rewritten.pop(old_key)
 
-    # Branch rewrites (any: list of branch dicts).
-    branches = rewritten.get("any")
+    branches = d.get("any")
     if isinstance(branches, list):
-        new_branches: list[Any] = []
         for i, branch in enumerate(branches):
             if not isinstance(branch, dict):
-                new_branches.append(branch)
                 continue
-            branch_copy = dict(branch)
             for old_key, new_key in _DEPRECATED_ALIASES.items():
-                if old_key in branch_copy and new_key in branch_copy:
-                    raise UsageError(
-                        errors=[
-                            ValidationError(
-                                file=source_label,
-                                line=1,
-                                col=1,
-                                pointer=f"/any/{i}",
-                                message=(
-                                    f"branch {i}: cannot specify both '{new_key}' and '{old_key}'"
-                                ),
-                                constraint="canonical_and_deprecated_alias_both_set",
-                            )
-                        ],
-                    )
-                if old_key in branch_copy:
+                if old_key in branch:
                     line, col = _locate_node(raw_text, ["any", i, old_key])
-                    warnings.append(
+                    errors.append(
                         ValidationError(
                             file=source_label,
                             line=line,
                             col=col,
                             pointer=f"/any/{i}/{old_key}",
                             message=(
-                                f"'{old_key}' is deprecated; use '{new_key}' (removed in v0.2)"
+                                f"'{old_key}' was a deprecated alias in v0.1 and is "
+                                f"removed in v0.2; use '{new_key}' instead."
                             ),
-                            severity="WARNING",
+                            constraint="removed_deprecated_alias",
                         )
                     )
-                    branch_copy[new_key] = branch_copy.pop(old_key)
-            new_branches.append(branch_copy)
-        rewritten["any"] = new_branches
 
-    return rewritten, warnings
+    return errors
 
 
 # --- Schema validation (uses ruamel.yaml AST for line/col) ---
@@ -728,13 +705,15 @@ def compute_signature(selector: Selector, *, cli_coverage_column: str | None) ->
 
 def _canonical_any_branch(branch: AnyBranch) -> dict[str, Any]:
     """Branch dict for JCS serialization. Same canonicalization rules as
-    top-level: drop `individual_ids_source` (path); set-like ID lists
-    sorted+deduped; absent (None / []) fields omitted."""
+    top-level: drop `individual_ids_source` (path); union YAML-inline +
+    file-loaded IDs; set-like ID lists sorted+deduped; absent (None / [])
+    fields omitted."""
     b: dict[str, Any] = {}
     if branch.populations:
         b["populations"] = sorted(set(branch.populations))
-    if branch.individual_ids:
-        b["individual_ids"] = sorted(set(branch.individual_ids))
+    branch_union_ids = sorted(set(branch.individual_ids) | set(branch.individual_ids_from_source))
+    if branch_union_ids:
+        b["individual_ids"] = branch_union_ids
     if branch.modern_only is not None:
         b["modern_only"] = branch.modern_only
     if branch.min_coverage is not None:

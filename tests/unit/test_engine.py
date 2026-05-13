@@ -187,6 +187,20 @@ def test_individual_ids_from_source_unioned() -> None:
     assert set(result.genetic_ids) == {"Loschbour.AG", "Loschbour.DG", "KO1"}
 
 
+def test_branch_individual_ids_from_source_unioned() -> None:
+    """v0.2: any-branch individual_ids + individual_ids_from_source are
+    union-merged the same way the top-level Selector pair is."""
+    af = make_fake_af()
+    sel = Selector(
+        any_branches=[
+            AnyBranch(individual_ids=["Loschbour"], individual_ids_from_source=["KO1"]),
+        ],
+    )
+    result = select_samples(af, sel)  # type: ignore[arg-type]
+    assert result.n_matched == 3
+    assert set(result.genetic_ids) == {"Loschbour.AG", "Loschbour.DG", "KO1"}
+
+
 def test_no_match_returns_empty_result() -> None:
     """populations: [nonexistent] → empty result; no error from engine."""
     af = make_fake_af()

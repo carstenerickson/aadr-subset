@@ -18,6 +18,8 @@ Per LLD §3.4 evaluation algorithm.
 
 from __future__ import annotations
 
+import fnmatch
+from collections.abc import Callable
 from pathlib import Path
 
 import aadr_resolve
@@ -80,6 +82,32 @@ def select_samples(
     # Effective top-level coverage_column: selector wins over CLI.
     top_effective_cov_col = selector.coverage_column or coverage_column
 
+    # Expand Group_ID glob patterns (v0.2). Patterns are detected by
+    # presence of `*`, `?`, or `[`; otherwise the literal passes through.
+    # Patterns that expand to zero matches in this .anno are collected
+    # for the warnings field — they're a near-certain bug signal
+    # (typo'd pattern, wrong AADR version, etc.).
+    #
+    # Empty-after-expansion semantics: when the user *had* a populations
+    # constraint that resolved to zero groups, the result is "match
+    # nothing" (all-False), NOT "no constraint" (all-True). Use None to
+    # mean "no constraint", `[]` to mean "constraint set, matches none".
+    available_groups = set(anno.group_id.unique().tolist())
+    empty_glob_patterns: list[str] = []
+
+    def _expand_if_set(literals: list[str]) -> list[str] | None:
+        if not literals:
+            return None
+        return _expand_group_id_patterns(literals, available_groups, empty_glob_patterns)
+
+    expanded_top_populations = _expand_if_set(selector.populations)
+    if selector.exclude is not None and selector.exclude.group_ids:
+        expanded_exclude_groups = _expand_group_id_patterns(
+            selector.exclude.group_ids, available_groups, empty_glob_patterns
+        )
+    else:
+        expanded_exclude_groups = []
+
     # 0. Cross-version IID lift. When resolve_to_version is set, the
     # selector's individual_ids (YAML + source-file union) are SOURCE IIDs;
     # we lift them to TARGET IIDs via aadr-resolve and feed those into
@@ -119,7 +147,7 @@ def select_samples(
         )
     top_and_mask = _build_predicate_mask(
         anno,
-        populations=selector.populations,
+        populations=expanded_top_populations,
         individual_ids=effective_individual_ids,
         modern_only=selector.modern_only,
         min_coverage=selector.min_coverage,
@@ -130,13 +158,26 @@ def select_samples(
     # 2. any: OR mask. Computed even when no any: block so we can attribute
     # counts; an absent any: yields all-True (does not filter). Each branch
     # gets the top-level effective coverage_column as its fallback; branch-
-    # level coverage_column overrides for that branch only.
+    # level coverage_column overrides for that branch only. Branch
+    # populations get the same glob expansion.
+    def _expand_branch_populations(literals: list[str]) -> list[str]:
+        # Branch populations expansion uses the same `available_groups`
+        # set + `empty_glob_patterns` accumulator as the top-level
+        # expansion so a single warnings list captures every empty
+        # pattern across the selector.
+        return _expand_group_id_patterns(literals, available_groups, empty_glob_patterns)
+
     any_or_mask, branch_masks = _build_any_or_mask(
-        anno, selector.any_branches, top_coverage_column=top_effective_cov_col
+        anno,
+        selector.any_branches,
+        top_coverage_column=top_effective_cov_col,
+        expand_populations=_expand_branch_populations,
     )
 
-    # 3. exclude: NOT-of-OR mask.
-    exclude_keep_mask = _build_exclude_mask(anno, selector.exclude)
+    # 3. exclude: NOT-of-OR mask with expanded group_ids.
+    exclude_keep_mask = _build_exclude_mask(
+        anno, selector.exclude, expanded_group_ids=expanded_exclude_groups
+    )
 
     # 4. Final mask.
     final_mask = top_and_mask & any_or_mask & exclude_keep_mask
@@ -155,8 +196,12 @@ def select_samples(
     # 7. per_branch_counts: attribute matched rows to top_level vs each any: branch.
     per_branch = _compute_per_branch_counts(top_and_mask, branch_masks, exclude_keep_mask)
 
-    # 8. excluded_counts: per-condition independent count.
-    excluded_counts = _compute_excluded_counts(anno, selector.exclude)
+    # 8. excluded_counts: per-condition independent count. Uses the
+    # expanded group_ids so a glob like `England_*` reports one row per
+    # concrete England_IA / England_Viking / ... that contributed.
+    excluded_counts = _compute_excluded_counts(
+        anno, selector.exclude, expanded_group_ids=expanded_exclude_groups
+    )
 
     # 9. matched_criteria: opt-in only.
     matched_criteria: dict[str, list[str]] = {}
@@ -169,6 +214,7 @@ def select_samples(
     warnings = SelectorWarnings(
         duplicate_genetic_ids=duplicates,
         missing_after_resolve=missing_after_resolve,
+        empty_glob_patterns=empty_glob_patterns,
     )
     return SubsetResult(
         genetic_ids=unique_gids,
@@ -187,7 +233,7 @@ def select_samples(
 def _build_predicate_mask(
     af: AnnoFrame,
     *,
-    populations: list[str],
+    populations: list[str] | None,
     individual_ids: list[str],
     modern_only: bool | None,
     min_coverage: float | None,
@@ -195,13 +241,17 @@ def _build_predicate_mask(
     coverage_column: str | None = None,
 ) -> pd.Series:
     """Build a boolean Series by AND-combining per-key sub-masks. Each
-    sub-mask is constructed only when its key is non-empty/non-None.
+    sub-mask is constructed only when its key is set / non-None.
 
     Returns all-True when no predicates are set (empty selector matches
     every row per HLD §Selector grammar semantics).
 
     Sub-mask construction:
-    - populations: af.group_id.isin(populations)
+    - populations: tri-state.
+      - None: no constraint (skip).
+      - []: constraint was set but resolved empty (e.g. a glob with zero
+        matches in this .anno) → all-False contribution (match nothing).
+      - non-empty: af.group_id.isin(populations).
     - individual_ids: af.individual_id.isin(individual_ids)
     - modern_only=True: af.date_calbp <= 70 (NaN/<NA> dates FAIL)
     - min_coverage=F: af.coverage >= F (NaN coverage FAILS).
@@ -212,8 +262,12 @@ def _build_predicate_mask(
     """
     masks: list[pd.Series] = []
 
-    if populations:
-        masks.append(af.group_id.isin(populations))
+    if populations is not None:
+        if populations:
+            masks.append(af.group_id.isin(populations))
+        else:
+            # Constraint set, resolved empty → match nothing.
+            masks.append(pd.Series([False] * af.n_rows, index=af.genetic_id.index))
 
     if individual_ids:
         masks.append(af.individual_id.isin(individual_ids))
@@ -251,6 +305,7 @@ def _build_any_or_mask(
     branches: list[AnyBranch],
     *,
     top_coverage_column: str | None = None,
+    expand_populations: Callable[[list[str]], list[str]] | None = None,
 ) -> tuple[pd.Series, list[pd.Series]]:
     """For each `any:` branch, build a branch mask via _build_predicate_mask.
     Returns (or_combined_mask, per_branch_mask_list).
@@ -272,20 +327,25 @@ def _build_any_or_mask(
 
     branch_masks: list[pd.Series] = []
     for branch in branches:
-        branch_iids = list(branch.individual_ids)
-        if branch.individual_ids_source is not None:
-            # Note: any-branch individual_ids_source loading happens in
-            # selector.load_selector for top-level; branches are not
-            # currently loaded by load_selector. Treat as empty here —
-            # explicit branch-source loading deferred to v0.2 if a use
-            # case surfaces. HLD calls for this support but the path
-            # isn't exercised yet.
-            pass
+        # Branch individual_ids = union of YAML-inline + file-loaded
+        # (selector.load_selector populates `individual_ids_from_source`
+        # for branches the same way it does for the top-level Selector).
+        branch_iids = sorted(set(branch.individual_ids) | set(branch.individual_ids_from_source))
         branch_cov_col = branch.coverage_column or top_coverage_column
+        # Tri-state populations: None = no constraint, [] = match nothing,
+        # non-empty = isin. Apply the same expansion + None-vs-empty rule
+        # the top-level uses.
+        branch_pops: list[str] | None
+        if not branch.populations:
+            branch_pops = None
+        elif expand_populations is not None:
+            branch_pops = expand_populations(branch.populations)
+        else:
+            branch_pops = list(branch.populations)
         branch_masks.append(
             _build_predicate_mask(
                 af,
-                populations=branch.populations,
+                populations=branch_pops,
                 individual_ids=branch_iids,
                 modern_only=branch.modern_only,
                 min_coverage=branch.min_coverage,
@@ -300,9 +360,18 @@ def _build_any_or_mask(
     return or_mask, branch_masks
 
 
-def _build_exclude_mask(af: AnnoFrame, exclude: ExcludeBlock | None) -> pd.Series:
+def _build_exclude_mask(
+    af: AnnoFrame,
+    exclude: ExcludeBlock | None,
+    *,
+    expanded_group_ids: list[str] | None = None,
+) -> pd.Series:
     """Per-condition OR over exclude.group_ids + exclude.individual_ids;
     return NOT-of-OR (the keep-mask).
+
+    `expanded_group_ids` carries the post-glob-expansion concrete labels
+    (caller-side); when supplied it takes precedence over
+    `exclude.group_ids` (which may contain unexpanded patterns).
 
     Returns all-True when exclude is None or both conditions are empty.
     """
@@ -310,8 +379,9 @@ def _build_exclude_mask(af: AnnoFrame, exclude: ExcludeBlock | None) -> pd.Serie
         return pd.Series([True] * af.n_rows, index=af.genetic_id.index)
 
     drop_masks: list[pd.Series] = []
-    if exclude.group_ids:
-        drop_masks.append(af.group_id.isin(exclude.group_ids))
+    group_ids_for_mask = expanded_group_ids if expanded_group_ids is not None else exclude.group_ids
+    if group_ids_for_mask:
+        drop_masks.append(af.group_id.isin(group_ids_for_mask))
     if exclude.individual_ids:
         drop_masks.append(af.individual_id.isin(exclude.individual_ids))
 
@@ -353,17 +423,30 @@ def _compute_per_branch_counts(
     return counts
 
 
-def _compute_excluded_counts(af: AnnoFrame, exclude: ExcludeBlock | None) -> list[ExcludeCount]:
+def _compute_excluded_counts(
+    af: AnnoFrame,
+    exclude: ExcludeBlock | None,
+    *,
+    expanded_group_ids: list[str] | None = None,
+) -> list[ExcludeCount]:
     """Per-literal fan-out: one ExcludeCount per excluded Group_ID
     and per excluded Individual_ID. Counts are independent (each
     counts the rows matching that specific literal, even when
     multiple literals overlap on the same row).
+
+    `expanded_group_ids` overrides exclude.group_ids when supplied —
+    used by select_samples to report concrete labels after glob
+    expansion (`England_*` reports per-real-group-id rows, not one
+    aggregate row for the pattern).
     """
     if exclude is None:
         return []
 
     counts: list[ExcludeCount] = []
-    for gid in exclude.group_ids:
+    group_ids_for_counts = (
+        expanded_group_ids if expanded_group_ids is not None else exclude.group_ids
+    )
+    for gid in group_ids_for_counts:
         n = int((af.group_id == gid).sum())
         if n > 0:
             counts.append(ExcludeCount(key="group_ids", value=gid, count=n))
@@ -479,6 +562,57 @@ def _filter_parallel(keys: list[str], values: list[str]) -> list[str]:
             seen.add(k)
             result.append(v)
     return result
+
+
+# --- Group_ID glob expansion (v0.2) ---
+
+# Characters that mark a literal as an fnmatch glob pattern. Anything
+# else is a regular literal and passes through expansion verbatim.
+_GLOB_CHARS = frozenset("*?[")
+
+
+def _is_glob(literal: str) -> bool:
+    return any(c in _GLOB_CHARS for c in literal)
+
+
+def _expand_group_id_patterns(
+    literals: list[str],
+    available_groups: set[str],
+    empty_patterns_out: list[str],
+) -> list[str]:
+    """Expand fnmatch-style glob patterns in a Group_ID literal list.
+
+    Literals without glob characters pass through. Literals with `*`,
+    `?`, or `[` are matched against `available_groups` (the unique
+    Group_ID set from the target .anno) via fnmatch. Patterns that
+    match zero groups are recorded in `empty_patterns_out` for the
+    caller to surface as a warning.
+
+    Returns a deduped list of concrete Group_ID labels preserving first-
+    appearance order (literals first as they appear, then expanded
+    matches in lexicographic order — fnmatch.filter returns the
+    iteration order of `available_groups`, so we sort there for
+    determinism across pandas versions).
+
+    Patterns are NOT included in the signature canonicalization step —
+    selector.compute_signature already hashes the patterns verbatim as
+    they appear in selector.populations / exclude.group_ids. The
+    EXPANSION is .anno-dependent and would couple the signature to the
+    AADR release, defeating the reproducibility contract.
+    """
+    seen: dict[str, None] = {}
+    for literal in literals:
+        if _is_glob(literal):
+            # Stable order: lexicographic over matched groups.
+            matches = sorted(fnmatch.filter(available_groups, literal))
+            if not matches:
+                empty_patterns_out.append(literal)
+                continue
+            for m in matches:
+                seen.setdefault(m, None)
+        else:
+            seen.setdefault(literal, None)
+    return list(seen)
 
 
 # --- Cross-version helpers (LLD §3.4 _resolve_cross_version) ---

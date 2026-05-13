@@ -119,6 +119,17 @@ def run_select(
     )
     eval_time = time.monotonic() - t_eval_start
 
+    # 5a. Glob-expansion warning. Patterns that matched zero Group_IDs
+    # in the target .anno are surfaced — almost certainly a typo
+    # (`Egnland_*` instead of `England_*`) or a version mismatch.
+    if result.warnings.empty_glob_patterns:
+        patterns = result.warnings.empty_glob_patterns
+        sys.stderr.write(
+            f"WARNING: {len(patterns)} Group_ID glob pattern(s) matched zero "
+            f"labels in {anno.version}: {patterns}. Check for typos or AADR "
+            f"version drift.\n"
+        )
+
     # 5b. Cross-version missing-IID stderr warning (non-strict path).
     # strict_resolve already raised SoftValidationFailure inside engine
     # if there were missing IIDs; if we got here with missing entries,

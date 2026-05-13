@@ -53,7 +53,13 @@ class ExcludeBlock:
 class AnyBranch:
     """One branch of an `any:` block. Same filter-predicate fields as the
     top-level selector minus `any`, `exclude`, `source_version`,
-    `resolve_to_version`, and `metadata` (all top-level-only)."""
+    `resolve_to_version`, and `metadata` (all top-level-only).
+
+    `individual_ids_from_source` holds IDs loaded from this branch's
+    `individual_ids_source` file (v0.2+). Engine evaluation and
+    `compute_signature` each union it with `individual_ids` independently
+    — same pattern as the top-level Selector pair.
+    """
 
     populations: list[str] = field(default_factory=list)
     individual_ids: list[str] = field(default_factory=list)
@@ -62,6 +68,7 @@ class AnyBranch:
     min_coverage: float | None = None
     coverage_column: str | None = None
     date: DateRange | None = None
+    individual_ids_from_source: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,14 +141,15 @@ class ExcludeCount:
 class SelectorWarnings:
     """Non-fatal warnings collected during engine evaluation.
 
-    `deprecated_selector_keys` holds unique deprecated YAML key names
-    (e.g., ["master_ids", "master_ids_source"]) — NOT one entry per
-    occurrence in the selector.
+    `empty_glob_patterns` (v0.2+) lists Group_ID glob patterns from the
+    selector that expanded to zero matching labels in the target .anno
+    — a typo signal, since matching nothing in the corpus is almost
+    never intentional.
     """
 
     missing_after_resolve: list[str] = field(default_factory=list)
     duplicate_genetic_ids: list[str] = field(default_factory=list)
-    deprecated_selector_keys: list[str] = field(default_factory=list)
+    empty_glob_patterns: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)

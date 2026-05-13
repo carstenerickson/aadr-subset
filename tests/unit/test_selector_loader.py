@@ -85,34 +85,87 @@ def test_three_doc_form_rejected(selector_dir: Path) -> None:
     assert any("got 3" in e.message for e in excinfo.value.errors)
 
 
-# --- Deprecated alias handling ---
+# --- Removed v0.1 aliases (v0.2: master_ids / master_ids_source are errors) ---
 
 
-def test_master_ids_deprecated_warning(
-    selector_dir: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """master_ids: alias accepted; produces stderr WARNING; rewrites to
-    individual_ids internally."""
+def test_master_ids_rejected_in_v02(selector_dir: Path) -> None:
+    """v0.1 deprecated `master_ids:` as an alias for `individual_ids:`
+    with a warn-and-rewrite. v0.2 removes the alias; using it now is a
+    UsageError (exit 4) with a clear "renamed to individual_ids" message.
+    """
     content = "master_ids:\n  - Loschbour\n  - Bichon\n"
-    path = write(selector_dir / "deprecated.yaml", content)
-    _metadata, selector = load_selector(path)
-    captured = capsys.readouterr()
-    assert "deprecated" in captured.err
-    assert "master_ids" in captured.err
-    # Selector internally uses individual_ids:
-    assert selector.individual_ids == ["Loschbour", "Bichon"]
-
-
-def test_canonical_and_deprecated_both_rejected(selector_dir: Path) -> None:
-    """Setting both individual_ids: AND master_ids: → UsageError."""
-    content = "individual_ids: [A]\nmaster_ids: [B]\n"
-    path = write(selector_dir / "both.yaml", content)
+    path = write(selector_dir / "removed.yaml", content)
     with pytest.raises(UsageError) as excinfo:
         load_selector(path)
-    assert any("both" in e.message.lower() for e in excinfo.value.errors)
+    assert any(e.constraint == "removed_deprecated_alias" for e in excinfo.value.errors)
+    assert any(
+        "removed in v0.2" in e.message and "individual_ids" in e.message
+        for e in excinfo.value.errors
+    )
+
+
+def test_master_ids_source_rejected_in_v02(selector_dir: Path) -> None:
+    """`master_ids_source:` likewise removed; pointer carries the bad key."""
+    content = "master_ids_source: ids.txt\n"
+    path = write(selector_dir / "removed_src.yaml", content)
+    with pytest.raises(UsageError) as excinfo:
+        load_selector(path)
+    matching = [e for e in excinfo.value.errors if e.pointer == "/master_ids_source"]
+    assert matching, "expected an error pointing at /master_ids_source"
+    assert "individual_ids_source" in matching[0].message
 
 
 # --- individual_ids_source file format ---
+
+
+def test_branch_individual_ids_source_loaded(selector_dir: Path) -> None:
+    """v0.2: any: branches with individual_ids_source: load the file
+    content into AnyBranch.individual_ids_from_source (parallel to the
+    top-level Selector pair)."""
+    cohort = write(selector_dir / "branch_cohort.txt", "Loschbour\nBichon\n")
+    selector_yaml = f"""any:
+  - populations: [Western_HG]
+  - individual_ids_source: {cohort.name}
+"""
+    path = write(selector_dir / "branch_src.yaml", selector_yaml)
+    _metadata, selector = load_selector(path)
+    assert selector.any_branches[1].individual_ids_from_source == ["Loschbour", "Bichon"]
+
+
+def test_branch_individual_ids_source_unions_with_inline(selector_dir: Path) -> None:
+    """Branch's YAML-inline individual_ids and the file-loaded set both
+    enter the canonical predicate (engine takes the union)."""
+    cohort = write(selector_dir / "more.txt", "Bichon\nKO1\n")
+    selector_yaml = f"""any:
+  - individual_ids: [Loschbour]
+    individual_ids_source: {cohort.name}
+"""
+    path = write(selector_dir / "branch_union.yaml", selector_yaml)
+    _metadata, selector = load_selector(path)
+    branch = selector.any_branches[0]
+    assert branch.individual_ids == ["Loschbour"]
+    assert branch.individual_ids_from_source == ["Bichon", "KO1"]
+
+
+def test_branch_individual_ids_source_relative_to_selector_dir(
+    selector_dir: Path, tmp_path: Path
+) -> None:
+    """Branch source paths resolve relative to the selector file's
+    directory (same as top-level), not CWD."""
+    cohort = write(selector_dir / "rel.txt", "I1\n")
+    selector_yaml = f"any:\n  - individual_ids_source: {cohort.name}\n"
+    path = write(selector_dir / "rel.yaml", selector_yaml)
+    # Load from a different CWD to ensure relative resolution uses
+    # selector dir, not CWD.
+    import os
+
+    orig = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        _metadata, selector = load_selector(path)
+    finally:
+        os.chdir(orig)
+    assert selector.any_branches[0].individual_ids_from_source == ["I1"]
 
 
 def test_individual_ids_source_basic(selector_dir: Path) -> None:
@@ -230,34 +283,33 @@ def test_yaml_parse_error_surfaces_with_line(selector_dir: Path) -> None:
     assert any("YAML parse error" in e.message for e in excinfo.value.errors)
 
 
-def test_master_ids_in_any_branch_warning(
-    selector_dir: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """Deprecated master_ids inside an any: branch produces WARNING."""
+def test_master_ids_in_any_branch_rejected(selector_dir: Path) -> None:
+    """`master_ids:` inside an any: branch is also a v0.2 error.
+    Per-occurrence diagnostic so the user sees every site to fix."""
     content = """any:
   - populations: [Western_HG]
   - master_ids: [Loschbour, Bichon]
 """
-    path = write(selector_dir / "branch_deprecated.yaml", content)
-    _metadata, selector = load_selector(path)
-    captured = capsys.readouterr()
-    assert "deprecated" in captured.err
-    # The branch's master_ids got rewritten to individual_ids.
-    assert selector.any_branches[1].individual_ids == ["Loschbour", "Bichon"]
-
-
-def test_canonical_and_deprecated_both_in_branch_rejected(
-    selector_dir: Path,
-) -> None:
-    """Both canonical and deprecated alias inside an any: branch → UsageError."""
-    content = """any:
-  - individual_ids: [A]
-    master_ids: [B]
-"""
-    path = write(selector_dir / "branch_both.yaml", content)
+    path = write(selector_dir / "branch_removed.yaml", content)
     with pytest.raises(UsageError) as excinfo:
         load_selector(path)
-    assert any("both" in e.message.lower() for e in excinfo.value.errors)
+    matching = [e for e in excinfo.value.errors if e.pointer == "/any/1/master_ids"]
+    assert matching, "expected an error pointing at /any/1/master_ids"
+
+
+def test_master_ids_top_level_and_branch_both_reported(selector_dir: Path) -> None:
+    """Multiple removed-alias occurrences each produce their own
+    ValidationError so the user fixes them in one pass."""
+    content = """master_ids: [A]
+any:
+  - master_ids_source: ids.txt
+"""
+    path = write(selector_dir / "two_sites.yaml", content)
+    with pytest.raises(UsageError) as excinfo:
+        load_selector(path)
+    pointers = {e.pointer for e in excinfo.value.errors}
+    assert "/master_ids" in pointers
+    assert "/any/0/master_ids_source" in pointers
 
 
 def test_selector_must_be_mapping(selector_dir: Path) -> None:

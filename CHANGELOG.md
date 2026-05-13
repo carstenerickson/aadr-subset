@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — v0.2.0.dev0
+
+### Added
+
+- **Group_ID glob patterns** (HLD: `populations:` literal matching now
+  supports fnmatch-style `*`, `?`, `[abc]`). A literal containing any of
+  `*`, `?`, `[` is treated as a pattern and expanded against the target
+  `.anno`'s Group_ID set at engine evaluation; plain literals pass
+  through unchanged.
+  - Works in `populations:`, `exclude.group_ids:`, and any-branch
+    `populations:`.
+  - Mixed literal+pattern lists are deduped in first-appearance order.
+  - Patterns that expand to zero matching labels in the target `.anno`
+    are recorded in `SubsetResult.warnings.empty_glob_patterns` and
+    surfaced via stderr WARNING from `run_select`. They're a near-certain
+    bug signal (typo'd pattern, wrong AADR version).
+  - `exclude.group_ids` glob expansion is reported in `excluded_counts`
+    per concrete label (one ExcludeCount per matched Group_ID, not one
+    aggregate row for the pattern).
+  - **Signature pin**: `compute_signature` hashes the **pattern** as
+    written, not the resolved expansion. The same selector against v62
+    vs v66 produces the same signature — the cohort definition (the
+    pattern, capturing user intent) is what's hashed; the resolved set
+    depends on the `.anno` and isn't part of the signature contract.
+
+- **Branch-level `individual_ids_source`** (closes a v0.1 deferred
+  feature). `any:` branches can now load Individual_IDs from a file the
+  same way the top-level Selector can. The branch's
+  `individual_ids_from_source` field is populated by `selector.load_selector`
+  (recursing into branches) and unioned with the inline `individual_ids`
+  in both engine evaluation and `compute_signature` canonicalization.
+
+### Changed (breaking)
+
+- **`master_ids:` / `master_ids_source:` are now errors.** In v0.1 they
+  were deprecated aliases (warn + rewrite to `individual_ids:` /
+  `individual_ids_source:`). v0.2 removes the alias entirely: any
+  selector still using them errors with a clear "renamed to … in v0.1;
+  removed in v0.2" `ValidationError` (`constraint='removed_deprecated_alias'`,
+  exit 4). The diagnostic is per-occurrence — top-level AND every
+  any-branch site are reported in one pass so the user fixes them all
+  at once.
+
+### Removed
+
+- `SelectorWarnings.deprecated_selector_keys` field (was declared in v0.1
+  but never populated; obsolete now that aliases are hard errors).
+
+### Engine internals
+
+- `_build_predicate_mask` now accepts `populations: list[str] | None`:
+  `None` = no constraint, `[]` = constraint set but resolves empty
+  (match nothing, all-False contribution), non-empty = `isin` filter.
+  This distinguishes "user didn't set populations" from "user set a
+  populations glob that matched zero Group_IDs" — the former is no-op,
+  the latter is meaningful (match nothing). Same tri-state applies to
+  any-branch populations.
+
+---
+
 ## [0.1.0] — 2026-05-12
 
 First public release.
