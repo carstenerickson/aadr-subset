@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 # --- Enums ---
 
@@ -34,6 +35,19 @@ class DiffFormat(StrEnum):
 
     HUMAN = "human"
     JSON = "json"
+
+
+class SamplingPolicy(StrEnum):
+    """Stratified-sampling policy (v0.3+).
+
+    v0.3 ships TOP_COVERAGE only; JSON-schema enforces the enum at
+    validate time so `policy: random` errors at the validate step,
+    not at engine runtime. RANDOM lands in v0.4+ alongside a required
+    seed field (see cs-wiki/projects/aadr-subset-stratified-sampling.md
+    §10 deferred items).
+    """
+
+    TOP_COVERAGE = "top_coverage"
 
 
 # --- Selector sub-types ---
@@ -92,6 +106,28 @@ class SelectorMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class SamplingSpec:
+    """Selector-side stratified-sampling spec (v0.3+).
+
+    Both cap fields are independent — either or both can be None.
+    Selector-side caps are union-merged with CLI flags
+    (--max-per-population, --max-per-individual) at the engine entry;
+    selector wins per-field per LLD pin (compute_signature follows the
+    same merge so two equivalent selectors produce the same signature).
+
+    Empty SamplingSpec() — both caps None AND no non-default policy —
+    is schema-rejected at YAML validate time per `anyOf` in
+    selector.schema.json. The dataclass allows construction (e.g. test
+    fixtures) but a Selector with such a SamplingSpec never reaches
+    the engine via load_selector.
+    """
+
+    max_per_population: int | None = None
+    max_per_individual: int | None = None
+    policy: SamplingPolicy = SamplingPolicy.TOP_COVERAGE
+
+
+@dataclass(frozen=True, slots=True)
 class Selector:
     """Parsed selector. Construct via selector.load_selector(); not directly.
 
@@ -128,6 +164,9 @@ class Selector:
     # with individual_ids; that happens in engine + compute_signature).
     individual_ids_from_source: list[str] = field(default_factory=list)
 
+    # Stratified-sampling spec (v0.3+; None = no sampling layer).
+    sampling: SamplingSpec | None = None
+
     # Metadata from first YAML document (two-doc selector form)
     metadata: SelectorMetadata = field(default_factory=SelectorMetadata)
 
@@ -143,6 +182,22 @@ class ExcludeCount:
     key: str  # "group_ids" or "individual_ids"
     value: str
     count: int
+
+
+@dataclass(frozen=True, slots=True)
+class SamplingDrop:
+    """One row in SubsetResult.sampling_drops (v0.3+).
+
+    Mirrors the ExcludeCount list-of-objects shape. List ordering in
+    SubsetResult.sampling_drops matches engine application order:
+    per-individual entries first (since per-IID applies first per
+    LLD pin), then per-population — so consumers reading the list
+    see the same sequence the engine applied.
+    """
+
+    dimension: Literal["population", "individual"]
+    key: str  # group_id (when dimension="population") or individual_id
+    count: int  # number of candidate rows dropped at this key
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +225,7 @@ class SubsetResult:
     per_population_counts: dict[str, int] = field(default_factory=dict)
     per_branch_counts: dict[str, int] = field(default_factory=dict)
     excluded_counts: list[ExcludeCount] = field(default_factory=list)
+    sampling_drops: list[SamplingDrop] = field(default_factory=list)
     matched_criteria: dict[str, list[str]] = field(default_factory=dict)
     warnings: SelectorWarnings = field(default_factory=SelectorWarnings)
     selector_signature: str = ""

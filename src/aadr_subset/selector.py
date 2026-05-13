@@ -42,6 +42,8 @@ from .types import (
     AnyBranch,
     DateRange,
     ExcludeBlock,
+    SamplingPolicy,
+    SamplingSpec,
     Selector,
     SelectorMetadata,
 )
@@ -605,6 +607,20 @@ def _build_selector(d: dict[str, Any], *, metadata: SelectorMetadata) -> Selecto
                 )
             )
 
+    # v0.3: sampling spec. Schema rejects empty `sampling: {}` upstream
+    # via anyOf, so a present `sampling` key always has at least one cap
+    # field. We still defend against an empty dict here (cheap; means
+    # the schema check was skipped, e.g. via a test fixture).
+    sampling = None
+    sampling_dict = d.get("sampling")
+    if isinstance(sampling_dict, dict) and sampling_dict:
+        policy_str = sampling_dict.get("policy", SamplingPolicy.TOP_COVERAGE.value)
+        sampling = SamplingSpec(
+            max_per_population=sampling_dict.get("max_per_population"),
+            max_per_individual=sampling_dict.get("max_per_individual"),
+            policy=SamplingPolicy(policy_str),
+        )
+
     ids_src = d.get("individual_ids_source")
     return Selector(
         populations=list(d.get("populations", [])),
@@ -618,6 +634,7 @@ def _build_selector(d: dict[str, Any], *, metadata: SelectorMetadata) -> Selecto
         resolve_to_version=d.get("resolve_to_version"),
         any_branches=any_branches,
         exclude=exclude,
+        sampling=sampling,
         metadata=metadata,
     )
 
@@ -625,7 +642,13 @@ def _build_selector(d: dict[str, Any], *, metadata: SelectorMetadata) -> Selecto
 # --- Selector signature (RFC 8785 JCS over canonicalized intent) ---
 
 
-def compute_signature(selector: Selector, *, cli_coverage_column: str | None) -> str:
+def compute_signature(
+    selector: Selector,
+    *,
+    cli_coverage_column: str | None,
+    cli_max_per_population: int | None = None,
+    cli_max_per_individual: int | None = None,
+) -> str:
     """SHA-256 over the RFC 8785 (JCS) canonical form of selector intent.
 
     Per LLD §3.3 algorithm:
@@ -697,6 +720,35 @@ def compute_signature(selector: Selector, *, cli_coverage_column: str | None) ->
             ex_dict["individual_ids"] = sorted(set(selector.exclude.individual_ids))
         if ex_dict:
             payload["exclude"] = ex_dict
+
+    # v0.3: sampling sub-dict. Per-field selector-vs-CLI merge; defaults
+    # elided (so `policy: top_coverage` explicit and omitted produce the
+    # same signature). See aadr-subset-stratified-sampling.md §5.
+    sampling_payload: dict[str, Any] = {}
+    eff_max_pop = (
+        selector.sampling.max_per_population
+        if (selector.sampling and selector.sampling.max_per_population is not None)
+        else cli_max_per_population
+    )
+    if eff_max_pop is not None:
+        sampling_payload["max_per_population"] = eff_max_pop
+    eff_max_iid = (
+        selector.sampling.max_per_individual
+        if (selector.sampling and selector.sampling.max_per_individual is not None)
+        else cli_max_per_individual
+    )
+    if eff_max_iid is not None:
+        sampling_payload["max_per_individual"] = eff_max_iid
+    # Policy: include only when non-default. v0.3 only ships
+    # SamplingPolicy.TOP_COVERAGE, but keep the elision rule so a future
+    # `policy: random` lands cleanly without churning existing signatures.
+    eff_policy = (
+        selector.sampling.policy if selector.sampling is not None else SamplingPolicy.TOP_COVERAGE
+    )
+    if eff_policy != SamplingPolicy.TOP_COVERAGE:
+        sampling_payload["policy"] = eff_policy.value
+    if sampling_payload:
+        payload["sampling"] = sampling_payload
 
     body = rfc8785.dumps(payload)
     digest = hashlib.sha256(body).hexdigest()

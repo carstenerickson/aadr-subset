@@ -28,6 +28,7 @@ from ..errors import (
 from ..reporting import write_report_json, write_report_tsv
 from ..selector import compute_signature, load_selector
 from ..types import ReportFormat
+from .select_cmd import _normalize_coverage_flags
 
 
 def run_report(
@@ -40,6 +41,10 @@ def run_report(
     allow_empty: bool,
     allow_empty_source: bool,
     include_empty_groups: bool,
+    coverage_column: str | None = None,
+    coverage_derive: str | None = None,
+    max_per_population: int | None = None,
+    max_per_individual: int | None = None,
     quiet: bool,
 ) -> int:
     """Orchestrate `aadr-subset report`. Returns exit code.
@@ -77,8 +82,14 @@ def run_report(
     except (OSError, aadr_resolve.IOFailure) as e:
         raise IOFailure(f"cannot load .anno at {anno_path}: {e}") from e
 
-    # 3. Compute selector signature.
-    sig = compute_signature(selector, cli_coverage_column=None)
+    # 3. Normalize coverage flags + compute selector signature.
+    cli_coverage_column = _normalize_coverage_flags(coverage_column, coverage_derive)
+    sig = compute_signature(
+        selector,
+        cli_coverage_column=cli_coverage_column,
+        cli_max_per_population=max_per_population,
+        cli_max_per_individual=max_per_individual,
+    )
 
     parse_time = time.monotonic() - t_parse_start
 
@@ -87,6 +98,9 @@ def run_report(
     result = select_samples(
         anno,
         selector,
+        coverage_column=cli_coverage_column,
+        max_per_population=max_per_population,
+        max_per_individual=max_per_individual,
         include_matched_criteria=False,
     )
     eval_time = time.monotonic() - t_eval_start

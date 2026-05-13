@@ -146,13 +146,15 @@ def test_write_json_key_order_pinned(tmp_path: Path) -> None:
     # Parse + check the key order (json.dumps preserves insertion order).
     raw = out.read_text(encoding="utf-8")
     keys_in_order = [line.split('"')[1] for line in raw.splitlines() if line.startswith('  "')]
-    # matched_criteria omitted when empty → 15 top-level keys, not 16.
+    # v0.3: sampling_drops inserted after excluded_counts (additive).
+    # matched_criteria still omitted when empty.
     expected = [
         "genetic_ids",
         "n_matched",
         "per_population_counts",
         "per_branch_counts",
         "excluded_counts",
+        "sampling_drops",
         "warnings",
         "selector_signature",
         "selector_file",

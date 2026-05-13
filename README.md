@@ -252,6 +252,12 @@ any:
 exclude:
   group_ids: [English.SG, "*_o.SG"]      # literals + globs
   individual_ids: [I12345]
+
+# Stratified sampling caps (v0.3+; applied after exclude, before dedup)
+sampling:
+  max_per_population: 50                 # cap per group_id (integer ≥ 1)
+  max_per_individual: 1                  # cap per individual_id (1 = pick best library)
+  policy: top_coverage                   # default; v0.3 ships only this
 ```
 
 **Group_ID globs (v0.2+)**: any string containing `*`, `?`, or `[abc]`
@@ -262,6 +268,19 @@ not the resolved set — so the same selector against v62 vs v66 produces
 the same signature even when the pattern resolves to different concrete
 labels. A pattern that matches zero Group_IDs surfaces as a stderr
 warning (likely typo).
+
+**Stratified sampling (v0.3+)**: `sampling.max_per_population` /
+`max_per_individual` cap the cohort within each Group_ID / Individual_ID.
+Per-individual fires first, then per-population — `max_per_individual: 1`
+is the canonical "one library per individual" dedup; combined with a
+per-population cap it picks the cap-many distinct individuals with the
+highest coverage. `--max-per-population N` / `--max-per-individual N`
+CLI flags also work; selector wins per-field. Both feed the signature
+(intent-not-expansion — same caps against v62 vs v66 = same hash). On
+class-D inputs (v62.0, no native coverage column), sampling requires
+`--coverage-derive snps_hit_1240k` for priority — without it, sampling
+errors out (the engine refuses to "prioritize" against an undefined
+coverage column).
 
 Full spec: [aadr-subset HLD](https://github.com/carstenerickson/aadr-subset/blob/main/docs/hld.md).
 

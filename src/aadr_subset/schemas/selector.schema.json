@@ -56,6 +56,10 @@
       "description": "NOT-of-OR block. A sample matching ANY condition is dropped. May NOT contain nested `exclude:` or `any:`.",
       "$ref": "#/$defs/exclude_block"
     },
+    "sampling": {
+      "description": "Stratified-sampling caps (v0.3+). Applied after predicate masks + exclude; cap is a CEILING, not a floor. Per-individual fires before per-population (see cs-wiki/projects/aadr-subset-stratified-sampling.md §4). Caps + policy enter selector_signature; resolution (the surviving sample set) does NOT — same intent-not-expansion rule as Group_ID globs.",
+      "$ref": "#/$defs/sampling_spec"
+    },
     "master_ids": {
       "description": "DEPRECATED alias for individual_ids. Removed in v0.2.",
       "deprecated": true,
@@ -163,6 +167,32 @@
           "$ref": "#/$defs/non_empty_string_array"
         }
       }
+    },
+    "sampling_spec": {
+      "description": "Stratified-sampling spec. At least one of max_per_population / max_per_individual must be set (the anyOf below enforces this — empty `sampling: {}` is a ValidationError).",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_per_population": {
+          "description": "Cap per Group_ID. Integer ≥ 1.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_per_individual": {
+          "description": "Cap per Individual_ID. Integer ≥ 1.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "policy": {
+          "description": "Sampling policy. v0.3 ships top_coverage only; future versions extend this enum.",
+          "type": "string",
+          "enum": ["top_coverage"]
+        }
+      },
+      "anyOf": [
+        { "required": ["max_per_population"] },
+        { "required": ["max_per_individual"] }
+      ]
     }
   }
 }

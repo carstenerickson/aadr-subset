@@ -48,6 +48,8 @@ def run_select(
     strict_resolve: bool = False,
     coverage_column: str | None = None,
     coverage_derive: str | None = None,
+    max_per_population: int | None = None,
+    max_per_individual: int | None = None,
     quiet: bool = False,
 ) -> int:
     """Orchestrate `aadr-subset select`. Returns exit code per HLD §Exit codes.
@@ -115,6 +117,8 @@ def run_select(
         mid_bridge=Path(mid_bridge) if mid_bridge else None,
         strict_resolve=strict_resolve,
         coverage_column=cli_coverage_column,
+        max_per_population=max_per_population,
+        max_per_individual=max_per_individual,
         include_matched_criteria=include_matched_criteria,
     )
     eval_time = time.monotonic() - t_eval_start
@@ -151,10 +155,16 @@ def run_select(
             "Pass --allow-empty for a sentinel-file write."
         )
 
-    # 7. Compute selector signature. CLI coverage_column injects into
-    # the signature ONLY when the selector itself doesn't pin one
-    # (selector wins per HLD §Coverage handling).
-    sig = compute_signature(selector, cli_coverage_column=cli_coverage_column)
+    # 7. Compute selector signature. CLI coverage_column / sampling
+    # caps inject into the signature ONLY when the selector itself
+    # doesn't pin them (selector wins per HLD §Coverage handling +
+    # aadr-subset-stratified-sampling.md §5).
+    sig = compute_signature(
+        selector,
+        cli_coverage_column=cli_coverage_column,
+        cli_max_per_population=max_per_population,
+        cli_max_per_individual=max_per_individual,
+    )
 
     # 8. Populate run-env metadata on the result. coverage_column_used
     # records the effective post-merge value (selector wins over CLI).

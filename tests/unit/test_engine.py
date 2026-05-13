@@ -24,6 +24,13 @@ from aadr_subset.types import (
 )
 
 
+class _FakeSchemaClass:
+    """Stand-in for aadr_resolve.types.SchemaClass enum's runtime
+    instance — engine only reads `.value`."""
+
+    value: str = "E"
+
+
 @dataclass
 class FakeAnnoFrame:
     """Minimal duck-type stand-in for aadr_resolve.AnnoFrame. Provides
@@ -66,6 +73,18 @@ class FakeAnnoFrame:
     @property
     def n_rows(self) -> int:
         return len(self._genetic_ids)
+
+    @property
+    def schema_class(self) -> _FakeSchemaClass:
+        # Most engine tests don't care about schema class; default to E
+        # (the modern class with native coverage). Class-D-specific
+        # behavior (v0.3 sampling hard-fail) is tested with a real
+        # aadr_resolve.AnnoFrame from the v62 synth fixture, not Fake.
+        return _FakeSchemaClass()
+
+    @property
+    def version(self) -> str:
+        return "vfake"
 
 
 def make_fake_af() -> FakeAnnoFrame:

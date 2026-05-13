@@ -5,6 +5,108 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — v0.3.0.dev0
+
+### Added
+
+- **Stratified sampling** — cap your cohort to at most N samples per
+  Group_ID and/or per Individual_ID. Designed in
+  [cs-wiki/projects/aadr-subset-stratified-sampling.md](https://github.com/carstenerickson/claude/blob/main/cs-wiki/projects/aadr-subset-stratified-sampling.md);
+  18 LLD pins; 35 tests. Use cases: PCA balance (cap 50 per population
+  so 4,000 modern English don't swamp 50 Yamnaya), multi-library dedup
+  (`max_per_individual: 1` picks the best library per individual,
+  collapsing AADR's `.AG` / `.DG` / `.SG` triples).
+
+  - **Selector grammar** gains a `sampling:` block:
+
+    ```yaml
+    sampling:
+      max_per_population: 50      # integer ≥ 1
+      max_per_individual: 1
+      policy: top_coverage        # default; future: random+seed
+    ```
+
+  - **CLI flags** `--max-per-population N` / `--max-per-individual N`
+    on `select`, `inspect`, `report`. `click.IntRange(min=1)` rejects
+    zero / negatives at click parse time. Selector wins per-field
+    (selector pins `max_per_population: 50` + CLI is
+    `--max-per-individual 1` → both apply).
+  - **Algorithm**: `top_coverage` policy sorts within each group by
+    `af.coverage` descending, takes top-N. Stable sort means tie-break
+    is `.anno` row order — deterministic without a seed. NaN coverage
+    sinks via `na_position='last'`. Per-individual cap fires BEFORE
+    per-population — broader-policy-second rule yields more survivors
+    when caps interact (counter-example in the design doc §4).
+  - **Signature semantics**: caps + policy enter the signature payload
+    per-field (selector wins; CLI fills omissions). Same selector
+    against v62 vs v66 produces the same hash even when the resolved
+    cohort differs — same intent-not-expansion rule as Group_ID globs.
+    Default `policy: top_coverage` elided from canonical form so
+    explicit vs omitted produce equal hashes.
+  - **`SubsetResult.sampling_drops: list[SamplingDrop]`** mirrors the
+    `excluded_counts` list-of-objects shape. JSON output gains a
+    top-level `sampling_drops` field (additive — no JSON_SCHEMA_VERSION
+    bump). Per-individual entries first, then per-population — same
+    sequence the engine applied. Sparse: only populated keys appear.
+  - **Class-D + sampling without `--coverage-derive` is a hard fail**
+    (IOFailure). Without a coverage column, prioritization is undefined
+    — silent degrade would violate principle of least surprise on a
+    feature the user explicitly asked for.
+  - **`inspect` summary** gains a "Downsampled" section showing
+    per-population drops explicitly + a one-line per-individual
+    aggregate (per-IID rows can be in the thousands; aggregate keeps
+    inspect readable, JSON output preserves the per-IID detail).
+  - **Cross-version + sampling**: per-individual cap operates on
+    TARGET Individual_IDs after the IID lift; coverage priority uses
+    the target `.anno`'s coverage. Integration-tested with the v62→v66
+    Loschbour fixture.
+  - **Branch `coverage_column` doesn't propagate to sampling** —
+    sampling uses the top-level effective coverage column.
+
+### Changed
+
+- **JSON output gains `sampling_drops`** as the 6th top-level field
+  (between `excluded_counts` and `matched_criteria`). Additive — old
+  consumers continue to work. JSON-schema version unchanged.
+
+- **`_compute_per_branch_counts` semantic**: branch contributions now
+  reflect post-sampling counts. The function gained an optional
+  `final_mask` parameter; engine wires the reduced (post-sampling)
+  mask through. Without sampling, behavior unchanged.
+
+- **`SamplingPolicy` enum schema-locked to `top_coverage`** in v0.3.
+  YAML with `policy: random` errors at validate time (selector schema
+  enum rejection) rather than at engine runtime. v0.4+ will extend
+  the enum.
+
+### Engine internals
+
+- New `engine._apply_sampling(af, candidates_mask, *, spec,
+  coverage_column) -> (reduced_mask, drops)` — public-ish private
+  helper. Sorts via `pd.DataFrame.sort_values(kind='stable',
+  na_position='last')` for cross-pandas determinism; pinned via a
+  snapshot test.
+- New `engine._merge_sampling_spec(selector_spec, *, cli_*)` — per-
+  field merge of selector vs CLI values; returns None when nothing is
+  set (engine skips the sampling layer entirely).
+
+### Deferred to v0.4+
+
+Per the design doc §10:
+- `policy: random` with required `seed:` field (signature includes
+  seed; uses `numpy.random.default_rng` for platform-independent
+  reproducibility).
+- `policy: stratified_by_date_bins`.
+- Branch-level `sampling:` in `any:` branches.
+- `min_per_population: N` (floor for qpAdm source requirements).
+- `sample_n_total: N` (global cap regardless of group).
+- Fraction syntax (`max_per_population: 0.5` → 50% of each group).
+- Per-sex / per-haplogroup caps.
+- `select --sampling-manifest PATH.tsv` (per-candidate decision +
+  reason TSV for audit).
+
+---
+
 ## [0.2.0] — 2026-05-13
 
 ### Added

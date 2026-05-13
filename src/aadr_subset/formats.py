@@ -9,17 +9,19 @@ JSON output key order is fixed (LLD §3.5 pin) for diff-friendliness:
 3. per_population_counts
 4. per_branch_counts
 5. excluded_counts
-6. matched_criteria  ← OMITTED ENTIRELY when empty
-7. warnings
-8. selector_signature
-9. selector_file
-10. anno_file
-11. anno_version
-12. schema_class
-13. coverage_column
-14. aadr_subset_version
-15. aadr_resolve_version
-16. schema_version
+6. sampling_drops  ← v0.3+; empty list when sampling inactive (additive,
+                     non-breaking; no JSON_SCHEMA_VERSION bump)
+7. matched_criteria  ← OMITTED ENTIRELY when empty
+8. warnings
+9. selector_signature
+10. selector_file
+11. anno_file
+12. anno_version
+13. schema_class
+14. coverage_column
+15. aadr_subset_version
+16. aadr_resolve_version
+17. schema_version
 """
 
 from __future__ import annotations
@@ -251,6 +253,10 @@ def write_json(
     out["per_population_counts"] = dict(result.per_population_counts)
     out["per_branch_counts"] = dict(result.per_branch_counts)
     out["excluded_counts"] = [asdict(ec) for ec in result.excluded_counts]
+    # v0.3: additive field per cs-wiki/aadr-subset-stratified-sampling.md §7
+    # (additive — no JSON_SCHEMA_VERSION bump). Empty list when sampling
+    # wasn't active OR was active but matched no candidates to drop.
+    out["sampling_drops"] = [asdict(sd) for sd in result.sampling_drops]
 
     if include_matched_criteria and result.matched_criteria:
         out["matched_criteria"] = {gid: list(crit) for gid, crit in result.matched_criteria.items()}

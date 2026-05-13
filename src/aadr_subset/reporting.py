@@ -151,6 +151,30 @@ def format_inspect_summary(result: SubsetResult, anno: AnnoFrame) -> str:
             lines.append(f"  {ec.key}: {ec.value}    {ec.count} {sample_word} dropped")
         lines.append("")
 
+    # v0.3: Downsampled section. Per-population entries are listed
+    # explicitly; per-individual entries are aggregated to one row
+    # (per-IID drops can be in the thousands and would dominate the
+    # inspect summary). JSON output (`select --format json`) preserves
+    # per-IID detail for callers that need it.
+    if result.sampling_drops:
+        lines.append("Downsampled:")
+        pop_drops = [sd for sd in result.sampling_drops if sd.dimension == "population"]
+        iid_drops = [sd for sd in result.sampling_drops if sd.dimension == "individual"]
+        if pop_drops:
+            key_w = max(len("group_id"), max(len(sd.key) for sd in pop_drops))
+            cnt_w = max(len(str(sd.count)) for sd in pop_drops)
+            for sd in pop_drops:
+                sample_word = "sample" if sd.count == 1 else "samples"
+                lines.append(f"  {sd.key:<{key_w}}  {sd.count:>{cnt_w}} {sample_word} dropped")
+        if iid_drops:
+            total = sum(sd.count for sd in iid_drops)
+            sample_word = "sample" if total == 1 else "samples"
+            lines.append(
+                f"  per-individual aggregate: {total} {sample_word} "
+                f"dropped across {len(iid_drops)} individual(s)"
+            )
+        lines.append("")
+
     # Date + coverage range over MATCHED rows. Compute from anno columns.
     if result.n_matched > 0:
         import numpy as np

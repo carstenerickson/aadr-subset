@@ -36,6 +36,9 @@ from .types import (
     DateRange,
     ExcludeBlock,
     ExcludeCount,
+    SamplingDrop,
+    SamplingPolicy,
+    SamplingSpec,
     Selector,
     SelectorWarnings,
     SubsetResult,
@@ -54,6 +57,8 @@ def select_samples(
     mid_bridge: Path | None = None,
     strict_resolve: bool = False,
     coverage_column: str | None = None,
+    max_per_population: int | None = None,
+    max_per_individual: int | None = None,
     include_matched_criteria: bool = False,
 ) -> SubsetResult:
     """Evaluate selector against AnnoFrame; return SubsetResult.
@@ -179,8 +184,29 @@ def select_samples(
         anno, selector.exclude, expanded_group_ids=expanded_exclude_groups
     )
 
-    # 4. Final mask.
-    final_mask = top_and_mask & any_or_mask & exclude_keep_mask
+    # 4. Candidates mask (pre-sampling). The "final mask" after v0.2;
+    # v0.3 inserts a sampling reduction step.
+    candidates_mask = top_and_mask & any_or_mask & exclude_keep_mask
+
+    # 4b. (v0.3) Stratified sampling. Merge selector spec with CLI
+    # values per-field; apply per-individual cap then per-population
+    # cap. Class-D + sampling without a coverage column is a hard
+    # IOFailure per LLD pin.
+    effective_sampling = _merge_sampling_spec(
+        selector.sampling,
+        cli_max_per_population=max_per_population,
+        cli_max_per_individual=max_per_individual,
+    )
+    if effective_sampling is not None:
+        final_mask, sampling_drops = _apply_sampling(
+            anno,
+            candidates_mask,
+            spec=effective_sampling,
+            coverage_column=top_effective_cov_col,
+        )
+    else:
+        final_mask = candidates_mask
+        sampling_drops = []
 
     # 5. Materialize matched rows + dedup.
     matched_gids: list[str] = anno.genetic_id[final_mask].tolist()
@@ -188,13 +214,19 @@ def select_samples(
     unique_gids, duplicates = _dedup_preserve_order(matched_gids)
     unique_group_ids = _filter_parallel(matched_gids, matched_group_ids)
 
-    # 6. per_population_counts in first-appearance order.
+    # 6. per_population_counts in first-appearance order. Reflects
+    # post-sampling counts naturally (computed from unique_group_ids,
+    # which came from final_mask).
     per_pop: dict[str, int] = {}
     for gpid in unique_group_ids:
         per_pop[gpid] = per_pop.get(gpid, 0) + 1
 
-    # 7. per_branch_counts: attribute matched rows to top_level vs each any: branch.
-    per_branch = _compute_per_branch_counts(top_and_mask, branch_masks, exclude_keep_mask)
+    # 7. per_branch_counts: attribute matched rows to top_level vs each
+    # any: branch. (v0.3) AND-in the sampling reduction so branch
+    # contributions reflect post-sampling counts.
+    per_branch = _compute_per_branch_counts(
+        top_and_mask, branch_masks, exclude_keep_mask, final_mask=final_mask
+    )
 
     # 8. excluded_counts: per-condition independent count. Uses the
     # expanded group_ids so a glob like `England_*` reports one row per
@@ -203,7 +235,9 @@ def select_samples(
         anno, selector.exclude, expanded_group_ids=expanded_exclude_groups
     )
 
-    # 9. matched_criteria: opt-in only.
+    # 9. matched_criteria: opt-in only. Operates on final_mask, so
+    # sampling-dropped rows naturally don't appear (they never made the
+    # final cohort).
     matched_criteria: dict[str, list[str]] = {}
     if include_matched_criteria:
         matched_criteria = _compute_matched_criteria(
@@ -222,6 +256,7 @@ def select_samples(
         per_population_counts=per_pop,
         per_branch_counts=per_branch,
         excluded_counts=excluded_counts,
+        sampling_drops=sampling_drops,
         matched_criteria=matched_criteria,
         warnings=warnings,
     )
@@ -401,6 +436,8 @@ def _compute_per_branch_counts(
     top_and_mask: pd.Series,
     branch_masks: list[pd.Series],
     exclude_keep_mask: pd.Series,
+    *,
+    final_mask: pd.Series | None = None,
 ) -> dict[str, int]:
     """For each branch in the any: block, count rows attributable to
     that branch (intersection with top_and AND exclude_keep_mask, so
@@ -409,17 +446,23 @@ def _compute_per_branch_counts(
     Per HLD pin: counts reflect the branch's CONTRIBUTION to the final
     result, not the branch's gross mask.
 
+    `final_mask` (v0.3+): when set, AND-in to the contribution
+    intersection so branch counts reflect post-sampling counts. When
+    None, behavior matches v0.2 (no sampling layer); the helper falls
+    back to (top_and & exclude_keep_mask) as the AND base.
+
     'top_level' key counts rows surviving top_and + exclude (regardless
-    of any: branch attribution).
+    of any: branch attribution), reduced to the final mask if supplied.
     """
     counts: dict[str, int] = {}
-    # top_level: rows that match top_and AND survive exclude.
-    counts["top_level"] = int((top_and_mask & exclude_keep_mask).sum())
+    base = top_and_mask & exclude_keep_mask
+    if final_mask is not None:
+        base = base & final_mask
+    counts["top_level"] = int(base.sum())
     for i, mask in enumerate(branch_masks):
-        # Contribution: rows matching this branch AND top_and AND surviving
-        # exclude. The (top_and & branch_mask) intersect is the relevant
-        # space (final = top_and & any_or & exclude_keep).
-        counts[f"any[{i}]"] = int((top_and_mask & mask & exclude_keep_mask).sum())
+        # Contribution: rows matching this branch AND top_and AND
+        # surviving exclude AND surviving sampling (when applicable).
+        counts[f"any[{i}]"] = int((base & mask).sum())
     return counts
 
 
@@ -562,6 +605,218 @@ def _filter_parallel(keys: list[str], values: list[str]) -> list[str]:
             seen.add(k)
             result.append(v)
     return result
+
+
+# --- Stratified sampling (v0.3) ---
+
+
+def _merge_sampling_spec(
+    selector_spec: SamplingSpec | None,
+    *,
+    cli_max_per_population: int | None,
+    cli_max_per_individual: int | None,
+) -> SamplingSpec | None:
+    """Merge selector-side SamplingSpec with CLI flag values, per-field.
+
+    Returns the merged spec (with selector winning on each field) when
+    ANY cap is set anywhere; returns None when nothing is set (engine
+    skips the sampling layer entirely).
+
+    Mirrors the `coverage_column` precedent (selector or CLI; selector
+    wins). Per-field merge means a selector that pins
+    max_per_population can still accept a CLI --max-per-individual.
+    """
+    eff_max_pop = (
+        selector_spec.max_per_population
+        if (selector_spec is not None and selector_spec.max_per_population is not None)
+        else cli_max_per_population
+    )
+    eff_max_iid = (
+        selector_spec.max_per_individual
+        if (selector_spec is not None and selector_spec.max_per_individual is not None)
+        else cli_max_per_individual
+    )
+    if eff_max_pop is None and eff_max_iid is None:
+        return None
+    # Policy: selector pins or default. v0.3 only ships TOP_COVERAGE.
+    policy = selector_spec.policy if selector_spec is not None else SamplingPolicy.TOP_COVERAGE
+    return SamplingSpec(
+        max_per_population=eff_max_pop,
+        max_per_individual=eff_max_iid,
+        policy=policy,
+    )
+
+
+def _apply_sampling(
+    af: AnnoFrame,
+    candidates_mask: pd.Series,
+    *,
+    spec: SamplingSpec,
+    coverage_column: str | None,
+) -> tuple[pd.Series, list[SamplingDrop]]:
+    """Apply per-individual + per-population caps to the candidate mask.
+
+    Returns (reduced_mask, sampling_drops).
+
+    Drops list ordering: per-individual entries first (since per-IID
+    applies first per LLD pin), then per-population — same sequence
+    the engine applied. Sparse: only populated entries appear; groups
+    where the cap wasn't binding don't generate a SamplingDrop row.
+
+    Class-D HARD FAIL: if the coverage column isn't available, raises
+    IOFailure with a clear message pointing at --coverage-derive. This
+    is distinct from the existing min_coverage class-D warning — that
+    warning lets min_coverage short-circuit silently to zero matches;
+    sampling can't do that because its job is to prioritize, not to
+    filter. Without a coverage column, prioritization is undefined.
+    """
+    # Class-D hard fail: af.coverage returns all-NaN on class D rather
+    # than raising MissingNativeFieldError; explicit guard catches this
+    # case at engine entry with a clear error pointing at
+    # --coverage-derive. (Higher-class .anno files with genuinely all-
+    # NaN coverage for a candidate pool still proceed; their NaN-sinks
+    # rule gives .anno-row-order tie-break.)
+    if af.schema_class.value == "D" and coverage_column is None:
+        raise IOFailure(
+            f"sampling requires a coverage column for prioritization; "
+            f"{af.version} (class D) has no native coverage column. "
+            f"Pass `--coverage-derive snps_hit_1240k` to use the SNPs-hit "
+            f"proxy, or set `coverage_column:` in the selector."
+        )
+
+    # Coverage series for the priority. Raises IOFailure on a class
+    # without the requested coverage_column (e.g. asking for
+    # `coverage_1240k_native` on class D); reword the error for sampling.
+    try:
+        cov_series = _coverage_series(af, coverage_column)
+    except IOFailure as e:
+        raise IOFailure(
+            "sampling requires a coverage column for prioritization; "
+            f"{af.version} (class {af.schema_class.value}) doesn't have one. "
+            f"Pass `--coverage-derive snps_hit_1240k` to use the SNPs-hit "
+            f"proxy. (Underlying error: {e})"
+        ) from e
+
+    # Build a working DataFrame view restricted to candidate rows. We
+    # operate on integer row positions throughout so the resulting
+    # reduced_mask aligns with the original AnnoFrame index.
+    candidate_positions: list[int] = [i for i, keep in enumerate(candidates_mask.tolist()) if keep]
+    if not candidate_positions:
+        # No candidates → nothing to sample.
+        return candidates_mask, []
+
+    individual_id_series = af.individual_id
+    group_id_series = af.group_id
+
+    surviving_positions: set[int] = set(candidate_positions)
+    drops: list[SamplingDrop] = []
+
+    # Step 1: per-individual cap (fires BEFORE per-population per LLD
+    # pin). Groupby IID; keep top-N by coverage; drop the rest.
+    if spec.max_per_individual is not None:
+        cap = spec.max_per_individual
+        new_surviving, indiv_drops = _apply_groupby_cap(
+            positions=sorted(surviving_positions),
+            group_keys=individual_id_series,
+            coverage=cov_series,
+            cap=cap,
+            dimension="individual",
+        )
+        surviving_positions = new_surviving
+        drops.extend(indiv_drops)
+
+    # Step 2: per-population cap.
+    if spec.max_per_population is not None:
+        cap = spec.max_per_population
+        new_surviving, pop_drops = _apply_groupby_cap(
+            positions=sorted(surviving_positions),
+            group_keys=group_id_series,
+            coverage=cov_series,
+            cap=cap,
+            dimension="population",
+            include_nan_group=False,  # NaN group_ids bypass per-pop per LLD pin
+        )
+        surviving_positions = new_surviving
+        drops.extend(pop_drops)
+
+    # Build the reduced mask from surviving positions.
+    reduced = pd.Series([False] * af.n_rows, index=candidates_mask.index)
+    if surviving_positions:
+        for pos in surviving_positions:
+            reduced.iloc[pos] = True
+
+    return reduced, drops
+
+
+def _apply_groupby_cap(
+    *,
+    positions: list[int],
+    group_keys: pd.Series,
+    coverage: pd.Series,
+    cap: int,
+    dimension: str,  # "individual" or "population"
+    include_nan_group: bool = True,
+) -> tuple[set[int], list[SamplingDrop]]:
+    """One pass: groupby a key, keep top-N by coverage within each group.
+
+    Returns (surviving_positions_set, drops_list).
+
+    Determinism rules (LLD pins §3):
+    - sort by coverage descending with NaN at the back
+    - kind='stable' so equal-coverage rows tie-break on .anno row order
+
+    include_nan_group:
+    - True (per-individual default): rows with NaN group_keys form
+      their own group and the cap applies to them.
+    - False (per-population default): rows with NaN group_id bypass
+      the cap entirely (their group is undefined per LLD pin).
+    """
+    if not positions:
+        return set(), []
+
+    # Build a working frame: position, group_key, coverage.
+    frame = pd.DataFrame(
+        {
+            "pos": positions,
+            "group": [group_keys.iloc[i] for i in positions],
+            "cov": [coverage.iloc[i] for i in positions],
+        }
+    )
+
+    # Stable sort: coverage descending, NaN at the back. The original
+    # `positions` ordering already follows .anno row order (we built
+    # the list by enumerating the mask in order), so the stable sort
+    # preserves first-appearance tie-break per LLD pin.
+    frame = frame.sort_values(by="cov", ascending=False, na_position="last", kind="stable")
+
+    surviving: set[int] = set()
+    drops_per_key: dict[str, int] = {}
+    # NaN-group bypass for per-population: these rows survive without
+    # cap accounting.
+    nan_mask = frame["group"].isna()
+    if not include_nan_group and nan_mask.any():
+        nan_rows = frame[nan_mask]
+        for pos in nan_rows["pos"].tolist():
+            surviving.add(int(pos))
+        frame = frame[~nan_mask]
+
+    # Groupby key; take top `cap` per group; rest are dropped.
+    # sort=False preserves first-appearance group order — matches the
+    # existing _compute_per_population_counts convention.
+    for key, group_frame in frame.groupby("group", sort=False, dropna=False):
+        kept = group_frame.head(cap)
+        dropped_n = len(group_frame) - len(kept)
+        for pos in kept["pos"].tolist():
+            surviving.add(int(pos))
+        if dropped_n > 0:
+            key_str = "" if (isinstance(key, float) and pd.isna(key)) else str(key)
+            drops_per_key[key_str] = dropped_n
+
+    drops = [
+        SamplingDrop(dimension=dimension, key=k, count=n)  # type: ignore[arg-type]
+        for k, n in drops_per_key.items()
+    ]
+    return surviving, drops
 
 
 # --- Group_ID glob expansion (v0.2) ---

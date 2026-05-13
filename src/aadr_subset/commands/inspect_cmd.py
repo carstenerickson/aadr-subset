@@ -19,6 +19,7 @@ from ..engine import select_samples
 from ..errors import EXIT_SUCCESS, IOFailure, UsageError, ValidationError
 from ..reporting import format_inspect_summary
 from ..selector import compute_signature, load_selector
+from .select_cmd import _normalize_coverage_flags
 
 
 def run_inspect(
@@ -28,6 +29,10 @@ def run_inspect(
     schema_override: str | None,
     allow_empty_source: bool,
     strict_resolve: bool,
+    coverage_column: str | None = None,
+    coverage_derive: str | None = None,
+    max_per_population: int | None = None,
+    max_per_individual: int | None = None,
     quiet: bool,
 ) -> int:
     """Orchestrate `aadr-subset inspect`. Always returns EXIT_SUCCESS.
@@ -63,18 +68,24 @@ def run_inspect(
     except (OSError, aadr_resolve.IOFailure) as e:
         raise IOFailure(f"cannot load .anno at {anno_path}: {e}") from e
 
-    # 3. Engine evaluation. include_matched_criteria=True so the inspect
-    # summary can show per-branch attribution.
+    # 3. Normalize coverage flags + engine evaluation.
+    cli_coverage_column = _normalize_coverage_flags(coverage_column, coverage_derive)
     result = select_samples(
         anno,
         selector,
+        coverage_column=cli_coverage_column,
+        max_per_population=max_per_population,
+        max_per_individual=max_per_individual,
         include_matched_criteria=True,
     )
 
-    # 4. Compute signature + populate run-env metadata. cli_coverage_column
-    # is None until --coverage-column ships; selector.coverage_column alone
-    # drives the signature today.
-    sig = compute_signature(selector, cli_coverage_column=None)
+    # 4. Compute signature + populate run-env metadata.
+    sig = compute_signature(
+        selector,
+        cli_coverage_column=cli_coverage_column,
+        cli_max_per_population=max_per_population,
+        cli_max_per_individual=max_per_individual,
+    )
     result = replace(
         result,
         anno_file=str(anno_path),

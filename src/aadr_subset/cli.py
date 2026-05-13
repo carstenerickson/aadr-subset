@@ -144,6 +144,26 @@ def validate_command(ctx: click.Context, selector_path: str) -> None:
     help="Alias for --coverage-column (only one of the two may be set). "
     "Mnemonic for the v62-class-D derived-proxy use case.",
 )
+@click.option(
+    "--max-per-population",
+    type=click.IntRange(min=1),
+    default=None,
+    metavar="N",
+    help="Stratified-sampling cap: at most N samples per Group_ID. Selector's "
+    "`sampling.max_per_population` takes precedence when both are set. "
+    "Selection within each group: highest-coverage first, .anno row order "
+    "for ties. v0.3+ feature.",
+)
+@click.option(
+    "--max-per-individual",
+    type=click.IntRange(min=1),
+    default=None,
+    metavar="N",
+    help="Stratified-sampling cap: at most N samples per Individual_ID. "
+    "`--max-per-individual 1` is the common dedup-multi-library case "
+    "(picks the best library per individual). Selector's "
+    "`sampling.max_per_individual` takes precedence. v0.3+ feature.",
+)
 @click.pass_context
 def select_command(
     ctx: click.Context,
@@ -160,6 +180,8 @@ def select_command(
     strict_resolve: bool,
     coverage_column: str | None,
     coverage_derive: str | None,
+    max_per_population: int | None,
+    max_per_individual: int | None,
 ) -> None:
     """Materialize a selector against a target AADR .anno; emit sample IDs / TSV / JSON.
 
@@ -182,6 +204,8 @@ def select_command(
         strict_resolve=strict_resolve,
         coverage_column=coverage_column,
         coverage_derive=coverage_derive,
+        max_per_population=max_per_population,
+        max_per_individual=max_per_individual,
         quiet=ctx.obj["quiet"],
     )
     sys.exit(exit_code)
@@ -209,6 +233,34 @@ def select_command(
     "accepted for diagnostic display but never changes inspect's exit code "
     "(inspect always exits 0).",
 )
+@click.option(
+    "--coverage-column",
+    default=None,
+    metavar="NAME",
+    help="Coverage-column override for sampling and min_coverage filters. "
+    "Selector's coverage_column: takes precedence. See `aadr-subset select "
+    "--help`.",
+)
+@click.option(
+    "--coverage-derive",
+    default=None,
+    metavar="NAME",
+    help="Alias for --coverage-column.",
+)
+@click.option(
+    "--max-per-population",
+    type=click.IntRange(min=1),
+    default=None,
+    metavar="N",
+    help="Stratified-sampling cap per Group_ID (v0.3+). See `aadr-subset select --help`.",
+)
+@click.option(
+    "--max-per-individual",
+    type=click.IntRange(min=1),
+    default=None,
+    metavar="N",
+    help="Stratified-sampling cap per Individual_ID (v0.3+).",
+)
 @click.pass_context
 def inspect_command(
     ctx: click.Context,
@@ -217,6 +269,10 @@ def inspect_command(
     schema_override: str | None,
     allow_empty_source: bool,
     strict_resolve: bool,
+    coverage_column: str | None,
+    coverage_derive: str | None,
+    max_per_population: int | None,
+    max_per_individual: int | None,
 ) -> None:
     """Diagnostic dry-run: shows what a selector matches against a target
     .anno without writing any output. Always exits 0 (informational)."""
@@ -226,6 +282,10 @@ def inspect_command(
         schema_override=schema_override,
         allow_empty_source=allow_empty_source,
         strict_resolve=strict_resolve,
+        coverage_column=coverage_column,
+        coverage_derive=coverage_derive,
+        max_per_population=max_per_population,
+        max_per_individual=max_per_individual,
         quiet=ctx.obj["quiet"],
     )
     sys.exit(exit_code)
@@ -271,6 +331,33 @@ def inspect_command(
     help="Include rows for .anno groups with zero matches (n_matched=0). "
     "Useful for population-survey workflows.",
 )
+@click.option(
+    "--coverage-column",
+    default=None,
+    metavar="NAME",
+    help="Coverage-column override (see select --help).",
+)
+@click.option(
+    "--coverage-derive",
+    default=None,
+    metavar="NAME",
+    help="Alias for --coverage-column.",
+)
+@click.option(
+    "--max-per-population",
+    type=click.IntRange(min=1),
+    default=None,
+    metavar="N",
+    help="Stratified-sampling cap per Group_ID (v0.3+). n_matched in the "
+    "TSV / JSON output reflects post-sampling counts.",
+)
+@click.option(
+    "--max-per-individual",
+    type=click.IntRange(min=1),
+    default=None,
+    metavar="N",
+    help="Stratified-sampling cap per Individual_ID (v0.3+).",
+)
 @click.pass_context
 def report_command(
     ctx: click.Context,
@@ -282,6 +369,10 @@ def report_command(
     allow_empty: bool,
     allow_empty_source: bool,
     include_empty_groups: bool,
+    coverage_column: str | None,
+    coverage_derive: str | None,
+    max_per_population: int | None,
+    max_per_individual: int | None,
 ) -> None:
     """Per-population aggregate output: group_id, n_matched, n_in_anno,
     pct_matched, date_min/max_calbp, coverage_median (+ JSON adds
@@ -295,6 +386,10 @@ def report_command(
         allow_empty=allow_empty,
         allow_empty_source=allow_empty_source,
         include_empty_groups=include_empty_groups,
+        coverage_column=coverage_column,
+        coverage_derive=coverage_derive,
+        max_per_population=max_per_population,
+        max_per_individual=max_per_individual,
         quiet=ctx.obj["quiet"],
     )
     sys.exit(exit_code)
