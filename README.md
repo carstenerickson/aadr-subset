@@ -73,7 +73,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-## The five subcommands
+## The six subcommands
 
 ### `validate SELECTOR.yaml`
 
@@ -162,6 +162,34 @@ England_IA  45          51          88.2          1934             2398         
 `--include-empty-groups` adds rows for `.anno` groups that matched
 zero samples (useful for population-survey workflows).
 
+### `diff SELECTOR_A.yaml SELECTOR_B.yaml ANNO.anno [-o PATH] [--format human|json]`
+
+Set-difference of two selectors against the same `.anno`: which samples
+does A match that B doesn't, and vice versa, plus a per-population
+delta. Always exits 0 — diagnostic, not a gate. Useful for PR review
+of selector changes.
+
+```
+$ aadr-subset diff old.yaml new.yaml v66.HO.aadr.PUB.anno
+Selector A: old.yaml (sha256:1a2b3c4...d5e6f7g)
+Selector B: new.yaml (sha256:9z8y7x6...w5v4u3t)
+.anno:      v66.HO.aadr.PUB.anno (v66.0, class E)
+
+A only: 5 samples
+B only: 12 samples
+Both:   38 samples
+
+Per-population delta:
+  group_id          A   B  delta
+  England_IA       43  40     -3
+  England_IA-o      0  10    +10
+  England_BellBeaker  0   2     +2
+```
+
+`--format json -o diff.json` writes a structured object with
+`a_only[]`, `b_only[]`, `both[]`, `per_population_delta[]` arrays plus
+both signatures — suitable for pipeline integration / dashboards.
+
 ### `template [NAME] [-o PATH]`
 
 Ships starter selectors for common cohorts. No-arg form lists
@@ -201,7 +229,7 @@ Flat — one level of nesting maximum. Top-level keys AND-combine.
 
 ```yaml
 # Top-level AND
-populations: [Western_HG, Eastern_HG]   # match against group_id
+populations: [Western_HG, "England_*"]   # group_id literals + fnmatch globs (v0.2)
 individual_ids: [Loschbour, KO1]         # match against individual_id
 individual_ids_source: ids.txt           # newline-delimited file
 modern_only: true                        # shorthand: date_calbp <= 70
@@ -222,9 +250,18 @@ any:
 
 # One-level NOT-of-OR (drops matches)
 exclude:
-  group_ids: [English.SG]
+  group_ids: [English.SG, "*_o.SG"]      # literals + globs
   individual_ids: [I12345]
 ```
+
+**Group_ID globs (v0.2+)**: any string containing `*`, `?`, or `[abc]`
+is treated as an fnmatch pattern against the target `.anno`'s
+Group_IDs. Patterns work in `populations:`, `exclude.group_ids:`, and
+any-branch `populations:`. The selector signature hashes the **pattern**,
+not the resolved set — so the same selector against v62 vs v66 produces
+the same signature even when the pattern resolves to different concrete
+labels. A pattern that matches zero Group_IDs surfaces as a stderr
+warning (likely typo).
 
 Full spec: [aadr-subset HLD](https://github.com/carstenerickson/aadr-subset/blob/main/docs/hld.md).
 

@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from . import __version__
 from .formats import atomic_write
-from .types import SubsetResult
+from .types import DiffResult, SubsetResult
 
 if TYPE_CHECKING:
     from aadr_resolve import AnnoFrame
@@ -28,6 +28,11 @@ if TYPE_CHECKING:
 # Report JSON schema version (HLD §Reports JSON). Bumped only on breaking
 # changes to the JSON shape (additive keys are non-breaking).
 REPORT_SCHEMA_VERSION = 1
+
+# Diff JSON schema version (HLD v0.2). Same versioning discipline as
+# REPORT_SCHEMA_VERSION — bump on breaking shape changes, additive keys
+# are non-breaking.
+DIFF_SCHEMA_VERSION = 1
 
 # Threshold for switching from compact-inline to columnar stdout
 # summary form (HLD §Stdout summary). <10 pops → inline; ≥10 → columnar.
@@ -414,10 +419,192 @@ def _fmt_float_or_blank(value: float | None) -> str:
     return "" if value is None else f"{value:g}"
 
 
+# --- Diff (v0.2: aadr-subset diff selA.yaml selB.yaml ANNO.anno) ---
+
+
+def build_diff_result(
+    result_a: SubsetResult,
+    result_b: SubsetResult,
+) -> DiffResult:
+    """Set-difference two SubsetResults that share the same target .anno.
+
+    Compute a_only / b_only / both as ordered lists (each list preserves
+    the .anno row order of its parent SubsetResult), plus a
+    per_population_delta dict mapping every Group_ID that either side
+    matched to its (n_a, n_b) tuple.
+
+    The two SubsetResults must have been computed against the same
+    AnnoFrame — caller's responsibility. Mismatched anno metadata is not
+    validated here; run_diff handles that gate.
+    """
+    set_a = set(result_a.genetic_ids)
+    set_b = set(result_b.genetic_ids)
+
+    a_only = [g for g in result_a.genetic_ids if g not in set_b]
+    b_only = [g for g in result_b.genetic_ids if g not in set_a]
+    # `both` preserves A's order (arbitrary tie-break; either side is fine).
+    both = [g for g in result_a.genetic_ids if g in set_b]
+
+    # per_population_delta: union of group_ids across both results.
+    all_groups: list[str] = []
+    seen: set[str] = set()
+    for g in list(result_a.per_population_counts) + list(result_b.per_population_counts):
+        if g not in seen:
+            all_groups.append(g)
+            seen.add(g)
+    per_pop_delta: dict[str, tuple[int, int]] = {
+        g: (
+            result_a.per_population_counts.get(g, 0),
+            result_b.per_population_counts.get(g, 0),
+        )
+        for g in all_groups
+    }
+
+    return DiffResult(
+        a_only=a_only,
+        b_only=b_only,
+        both=both,
+        per_population_delta=per_pop_delta,
+        a_signature=result_a.selector_signature,
+        b_signature=result_b.selector_signature,
+        selector_a_file=result_a.selector_file,
+        selector_b_file=result_b.selector_file,
+        anno_file=result_a.anno_file,
+        anno_version=result_a.anno_version,
+        schema_class=result_a.schema_class,
+    )
+
+
+def format_diff_summary(diff: DiffResult, *, sample_preview: int = 10) -> str:
+    """Multi-line human-readable diff summary.
+
+    Set sizes + per-population delta table + a small per-side preview of
+    the diverging sample IDs. Output goes to stdout (diff has no
+    machine-readable companion when format=human, so stdout is the
+    consumer surface).
+    """
+    lines: list[str] = []
+    lines.append(f"Selector A: {diff.selector_a_file}{_signature_tail(diff.a_signature)}")
+    lines.append(f"Selector B: {diff.selector_b_file}{_signature_tail(diff.b_signature)}")
+    lines.append(f".anno:      {diff.anno_file} ({diff.anno_version}, class {diff.schema_class})")
+    lines.append("")
+
+    n_a_only = len(diff.a_only)
+    n_b_only = len(diff.b_only)
+    n_both = len(diff.both)
+    lines.append(f"A only: {n_a_only} sample{'s' if n_a_only != 1 else ''}")
+    lines.append(f"B only: {n_b_only} sample{'s' if n_b_only != 1 else ''}")
+    lines.append(f"Both:   {n_both} sample{'s' if n_both != 1 else ''}")
+    lines.append("")
+
+    if diff.per_population_delta:
+        lines.append("Per-population delta:")
+        # Right-pad columns for stable alignment.
+        groups = list(diff.per_population_delta)
+        name_w = max(len("group_id"), max(len(g) for g in groups))
+        a_w = max(len("A"), max(len(str(v[0])) for v in diff.per_population_delta.values()))
+        b_w = max(len("B"), max(len(str(v[1])) for v in diff.per_population_delta.values()))
+        delta_w = max(
+            len("delta"),
+            max(len(_fmt_delta(b - a)) for a, b in diff.per_population_delta.values()),
+        )
+        header = f"  {'group_id':<{name_w}}  {'A':>{a_w}}  {'B':>{b_w}}  {'delta':>{delta_w}}"
+        lines.append(header)
+        for g, (a, b) in diff.per_population_delta.items():
+            delta = _fmt_delta(b - a)
+            lines.append(f"  {g:<{name_w}}  {a:>{a_w}}  {b:>{b_w}}  {delta:>{delta_w}}")
+        lines.append("")
+
+    if n_a_only > 0:
+        preview = diff.a_only[:sample_preview]
+        suffix = "" if n_a_only <= sample_preview else f" (+{n_a_only - sample_preview} more)"
+        lines.append(f"A only sample preview: {preview}{suffix}")
+    if n_b_only > 0:
+        preview = diff.b_only[:sample_preview]
+        suffix = "" if n_b_only <= sample_preview else f" (+{n_b_only - sample_preview} more)"
+        lines.append(f"B only sample preview: {preview}{suffix}")
+
+    return "\n".join(lines).rstrip()
+
+
+def write_diff_json(diff: DiffResult, *, out_path: Path | None) -> None:
+    """Serialize a DiffResult to JSON.
+
+    Top-level keys: anno_file, anno_version, schema_class, selector_a,
+    selector_b, n_a_only, n_b_only, n_both, a_only[], b_only[], both[],
+    per_population_delta[] (list of {group_id, n_a, n_b, delta}),
+    schema_version, aadr_subset_version. List ordering preserves the
+    .anno row order of each parent SubsetResult.
+
+    Atomic write to PATH or write to stdout when None.
+    """
+    pop_delta_rows = [
+        {
+            "group_id": g,
+            "n_a": n_a,
+            "n_b": n_b,
+            "delta": n_b - n_a,
+        }
+        for g, (n_a, n_b) in diff.per_population_delta.items()
+    ]
+    payload: dict[str, Any] = {
+        "anno_file": diff.anno_file,
+        "anno_version": diff.anno_version,
+        "schema_class": diff.schema_class,
+        "selector_a": {
+            "file": diff.selector_a_file,
+            "signature": diff.a_signature,
+        },
+        "selector_b": {
+            "file": diff.selector_b_file,
+            "signature": diff.b_signature,
+        },
+        "n_a_only": len(diff.a_only),
+        "n_b_only": len(diff.b_only),
+        "n_both": len(diff.both),
+        "a_only": list(diff.a_only),
+        "b_only": list(diff.b_only),
+        "both": list(diff.both),
+        "per_population_delta": pop_delta_rows,
+        "schema_version": DIFF_SCHEMA_VERSION,
+        "aadr_subset_version": __version__,
+    }
+
+    body = json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=False) + "\n"
+    if out_path is None:
+        sys.stdout.write(body)
+        sys.stdout.flush()
+        return
+    atomic_write(out_path, body)
+
+
+def _fmt_delta(d: int) -> str:
+    """Render a per-population delta with a leading sign for non-zero."""
+    if d > 0:
+        return f"+{d}"
+    return str(d)
+
+
+def _signature_tail(sig: str) -> str:
+    """Render a parenthesized short signature for header lines. Empty
+    when sig is empty (e.g. a SubsetResult that never went through
+    run_select)."""
+    if not sig:
+        return ""
+    if sig.startswith("sha256:") and len(sig) >= 20:
+        body = sig[len("sha256:") :]
+        return f" (sha256:{body[:7]}...{body[-7:]})"
+    return f" ({sig})"
+
+
 __all__ = [
+    "DIFF_SCHEMA_VERSION",
     "REPORT_SCHEMA_VERSION",
+    "build_diff_result",
+    "format_diff_summary",
     "format_inspect_summary",
     "format_stdout_summary",
+    "write_diff_json",
     "write_report_json",
     "write_report_tsv",
 ]

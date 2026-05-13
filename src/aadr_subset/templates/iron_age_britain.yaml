@@ -1,8 +1,8 @@
 # Iron Age Britain starter template (~2400-1900 calBP / ~450 BCE - 50 CE).
 #
 # Verified against AADR v62.0 + v66.0. v62 carries the `.AG` / `.SG`
-# suffix; v66 dropped it for canonical labels. Both forms listed below
-# so the template resolves on either release.
+# suffix; v66 dropped it. Uses a Group_ID glob (`England_IA.[AS]G`) to
+# match both v62 suffix forms in one line, plus the bare v66 label.
 tested_against: [v62.0, v66.0]
 last_verified: '2026-05-12'
 maintainer: aadr-subset
@@ -12,11 +12,10 @@ notes: |
   carries `Scotland_IA` or `Wales_IA` — Scotland/Wales samples from the
   British Iron Age aren't sampled separately.
 
-  To include Roman-era and Early Medieval samples, add (v62 forms)
-  `England_IA_Roman.SG`, `England_IA_ERoman.SG`,
-  `England_IA_EarlyMedieval.AG`, or (v66 forms) `England_PostIA_Roman`,
-  `England_EarlyMedieval`. To drop outliers, append an `exclude:` block
-  with `England_IA-o` (v66) or `England_IA_o.SG` (v62).
+  To include Roman-era and Early Medieval samples, replace the literals
+  below with `England_IA*` — that glob matches the same plus the Roman
+  / EarlyMedieval / outlier variants. To drop outliers from the broader
+  pattern, add `exclude:` with `group_ids: [England_IA-o*, "*_o.SG"]`.
 
   min_coverage: 0.3 against the native `coverage_1240k` column is
   conservative. On v62.0 (class D, no native coverage), pair with
@@ -24,9 +23,8 @@ notes: |
   targets observed. On v66.0 the native column suffices.
 ---
 populations:
-  - England_IA.AG    # v62
-  - England_IA.SG    # v62
-  - England_IA       # v66
+  - England_IA           # v66
+  - "England_IA.[AS]G"   # v62: matches England_IA.AG + England_IA.SG
 date:
   min_calbp: 1900
   max_calbp: 2400

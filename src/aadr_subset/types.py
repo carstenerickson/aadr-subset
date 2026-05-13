@@ -28,6 +28,14 @@ class ReportFormat(StrEnum):
     JSON = "json"
 
 
+class DiffFormat(StrEnum):
+    """--format value for diff. `human` is a multi-line summary to stdout
+    (default); `json` is a structured object for pipeline integration."""
+
+    HUMAN = "human"
+    JSON = "json"
+
+
 # --- Selector sub-types ---
 
 
@@ -172,3 +180,32 @@ class SubsetResult:
     schema_class: str = ""
     selector_file: str = ""
     coverage_column_used: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DiffResult:
+    """Result of `aadr-subset diff selA.yaml selB.yaml ANNO.anno`.
+
+    Set-difference of two SubsetResult.genetic_ids lists computed against
+    the same target AnnoFrame, plus per-population deltas (n_a, n_b per
+    Group_ID that either side matched).
+
+    GeneticID list ordering: a_only, b_only, and both preserve the .anno
+    row order of their respective SubsetResult — the lists are produced by
+    filtering the union genetic_ids set against each SubsetResult, so
+    callers can downstream-iterate them in a stable order.
+    """
+
+    a_only: list[str]
+    b_only: list[str]
+    both: list[str]
+    per_population_delta: dict[str, tuple[int, int]]  # group_id -> (n_a, n_b)
+
+    a_signature: str
+    b_signature: str
+    selector_a_file: str
+    selector_b_file: str
+
+    anno_file: str
+    anno_version: str
+    schema_class: str

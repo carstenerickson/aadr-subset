@@ -1,9 +1,10 @@
 # Neolithic Anatolia starter template (~9500-7000 calBP).
 #
-# Verified against AADR v62.0 + v66.0. v62 carries `Turkey_{Region}_
-# {Site}_N.{AG|SG|DG}`; v66 simplified to `Turkey_{Site}_{Period}` with
-# no suffix and consolidated `Turkey_N`. Barcin dropped from v66 HO
-# (still in 1240K).
+# Verified against AADR v62.0 + v66.0. v62 carries
+# `Turkey_{Region}_{Site}_N.{AG|SG|DG}` (Marmara region + Central
+# Anatolia); v66 simplified to `Turkey_{Site}_{Period}` without the
+# region prefix and dropped Barcin entirely from the HO panel.
+# Globs capture both layouts.
 tested_against: [v62.0, v66.0]
 last_verified: '2026-05-12'
 maintainer: aadr-subset
@@ -12,31 +13,23 @@ notes: |
   (Early European Farmer) component that spread westward starting
   ~8500 calBP. Useful as a qpAdm distal source.
 
-  v62 breaks these out by site: Barcin, Catalhoyuk, TepecikCiftlik,
-  Ilipinar, Kumtepe (Marmara region) + Central Anatolia variants.
-  v66 HO dropped the Barcin / Marmara breakdown entirely; only
-  Catalhoyuk + the consolidated `Turkey_N` labels remain. Both forms
-  listed — unmatched literals are harmless.
-
-  Pre-Catalhoyuk Aceramic Neolithic sites (Cayonu, Asikli) aren't
-  included; add them if your question reaches that deep.
+  Notable difference between releases: v66 HO dropped the Barcin
+  / Marmara breakdown that v62 carries. v62 has Barcin (Marmara
+  region) + Catalhoyuk + TepecikCiftlik + Ilipinar + Kumtepe;
+  v66 HO has only Catalhoyuk plus a consolidated `Turkey_N`. The
+  globs adapt automatically.
 ---
 populations:
-  # v62 forms (Marmara region with .SG/.AG/.DG suffixes)
-  - Turkey_Marmara_Barcin_N.SG
-  - Turkey_Marmara_Barcin_N.AG
-  - Turkey_Marmara_Barcin_N.DG
-  - Turkey_Marmara_Barcin_Hofmanova_N.SG
-  - Turkey_Marmara_Ilipinar_N.AG
-  - Turkey_Marmara_Illipinar_N.AG
-  - Turkey_Marmara_Kumtepe_N.SG
-  - Turkey_Central_Catalhoyuk_N.SG
-  - Turkey_Central_TepecikCiftlik_N.WGC.SG
-  # v66 forms (suffix-less; Marmara breakdown dropped from HO panel)
-  - Turkey_Catalhoyuk_N
-  - Turkey_Catalhoyuk_EN
-  - Turkey_Catalhoyuk_MN
-  - Turkey_Catalhoyuk_LN
+  # Catalhoyuk + period qualifiers (EN / MN / LN / N) across both versions
+  - "Turkey_*Catalhoyuk_*N*"
+  # Barcin (v62 only — dropped from v66 HO)
+  - "Turkey_*Barcin*"
+  # TepecikCiftlik + Ilipinar / Illipinar + Kumtepe (mostly v62)
+  - "Turkey_*TepecikCiftlik*"
+  - "Turkey_*Ilipinar*"
+  - "Turkey_*Illipinar*"
+  - "Turkey_*Kumtepe*"
+  # v66 consolidated label
   - Turkey_N
 date:
   min_calbp: 7000

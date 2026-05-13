@@ -1,11 +1,10 @@
 # Bronze Age Europe starter template (~5000-2700 calBP).
 #
-# Verified against AADR v62.0 + v66.0. Suffix variants in v62 (.AG/.SG)
-# were dropped in v66; both forms included so the template resolves
-# against either release. v66 additionally fragments several large
-# horizons (Germany_BellBeaker, Germany_CordedWare) into site-specific
-# labels — those v66 labels are not enumerated here individually; rely
-# on the canonical country-prefix labels that survived.
+# Verified against AADR v62.0 + v66.0. Mixes literal labels (where
+# names are clean across versions) with Group_ID glob patterns (where
+# v66's site-fragmentation needs them) — e.g. v66 has dozens of
+# Germany_<site>_BellBeaker site-prefixed labels that the glob
+# `Germany_*_BellBeaker*` collects in one line.
 tested_against: [v62.0, v66.0]
 last_verified: '2026-05-12'
 maintainer: aadr-subset
@@ -14,39 +13,40 @@ notes: |
   horizons (Bell Beaker, Corded Ware, Unetice, Yamnaya). Pulls from
   several countries so the cohort is broad enough for PCA / clustering
   context. For tight ancestry questions, narrow to one country per
-  horizon (e.g. just `Czechia_BellBeaker` + `Czechia_EBA_CordedWare`).
+  horizon — and probably drop the wildcard imports for cleaner
+  signature semantics.
 
-  v66 site-level granularity: if you need Germany BellBeaker /
-  CordedWare specifically on v66, add the site-prefix variants
-  (e.g. `Germany_AugsburgHugoEckenerStrasse_BellBeaker`,
-  `Germany_Esperstedt_CordedWare`). They exist as separate labels in
-  v66 but not in v62; the template doesn't list them to stay portable.
+  The `Germany_*_BellBeaker*` / `Germany_*_CordedWare*` patterns
+  capture v66's site-fragmented labels (Germany_Esperstedt_BellBeaker,
+  Germany_AugsburgHugoEckenerStrasse_BellBeaker, etc.) in one rule
+  each. On v62 they additionally match the suffix variants
+  (Germany_BellBeaker.AG, Germany_BellBeaker_lc.AG, etc.).
 ---
 date:
   min_calbp: 2700
   max_calbp: 5000
 populations:
-  # v62.0 forms (with .AG / .SG suffixes)
-  - Czechia_BellBeaker.AG
-  - England_BellBeaker.AG
-  - England_EBA_BellBeaker.AG
-  - France_BellBeaker.AG
-  - Germany_BellBeaker.AG
-  - Germany_CordedWare.AG
-  - Czechia_EBA_CordedWare.AG
-  - Estonia_CordedWare.AG
-  - Latvia_LN_CordedWare.AG
-  - Poland_CordedWare.SG
-  - Czechia_EBA_Unetice.AG
-  - Russia_Samara_EBA_Yamnaya.AG
-  - Russia_Kalmykia_EBA_Yamnaya.SG
-  # v66.0 forms (suffix dropped)
-  - Czechia_BellBeaker
-  - England_BellBeaker
-  - France_BellBeaker
-  - Czechia_EBA_CordedWare
-  - Estonia_LN_CordedWare
-  - Czechia_EBA_Unetice
-  - Russia_Samara_EBA_Yamnaya
-  - Russia_Kalmykia_EBA_Yamnaya
+  # Bell Beaker by country
+  - Czechia_BellBeaker.AG       # v62
+  - Czechia_BellBeaker          # v66
+  - England_BellBeaker.AG       # v62
+  - England_BellBeaker          # v66
+  - France_BellBeaker.AG        # v62
+  - France_BellBeaker           # v66
+  - "Germany_*_BellBeaker*"     # both versions; v66 site-fragmented
+  # Corded Ware
+  - Czechia_EBA_CordedWare.AG   # v62
+  - Czechia_EBA_CordedWare      # v66
+  - Estonia_LN_CordedWare       # v66
+  - "Germany_*_CordedWare*"     # both versions; v66 site-fragmented
+  - "Latvia_*CordedWare*"
+  - "Poland_*CordedWare*"
+  # Unetice
+  - Czechia_EBA_Unetice.AG      # v62
+  - Czechia_EBA_Unetice         # v66
+  - "Germany_*_Unetice*"
+  # Yamnaya (steppe-derived horizon)
+  - Russia_Samara_EBA_Yamnaya   # v66 (bare)
+  - "Russia_Samara_EBA_Yamnaya.*"   # v62 suffix variants
+  - "Russia_Kalmykia_EBA_Yamnaya*"  # both versions
 min_coverage: 0.3

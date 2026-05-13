@@ -15,6 +15,7 @@ import sys
 import click
 
 from . import __version__
+from .commands.diff_cmd import run_diff
 from .commands.inspect_cmd import run_inspect
 from .commands.report_cmd import run_report
 from .commands.select_cmd import run_select
@@ -294,6 +295,68 @@ def report_command(
         allow_empty=allow_empty,
         allow_empty_source=allow_empty_source,
         include_empty_groups=include_empty_groups,
+        quiet=ctx.obj["quiet"],
+    )
+    sys.exit(exit_code)
+
+
+@cli.command("diff")
+@click.argument("selector_a_path", type=click.STRING)
+@click.argument("selector_b_path", type=click.STRING)
+@click.argument("anno_path", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "-o",
+    "--out",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Output file path (default: stdout).",
+)
+@click.option(
+    "--format",
+    "fmt",
+    type=click.Choice(["human", "json"]),
+    default="human",
+    show_default=True,
+    help="Diff output. `human`=multi-line summary with per-population delta; "
+    "`json`=structured object suitable for pipeline integration.",
+)
+@click.option(
+    "--schema-override",
+    type=click.Choice(["A", "B", "C", "D", "E"]),
+    default=None,
+    help="Force AnnoFrame schema class (A-E).",
+)
+@click.option(
+    "--allow-empty-source",
+    is_flag=True,
+    help="Allow individual_ids_source files to be empty in either selector.",
+)
+@click.pass_context
+def diff_command(
+    ctx: click.Context,
+    selector_a_path: str,
+    selector_b_path: str,
+    anno_path: str,
+    out: str | None,
+    fmt: str,
+    schema_override: str | None,
+    allow_empty_source: bool,
+) -> None:
+    """Compare two selectors against a target .anno: which samples does
+    selector A match that B doesn't, and vice versa? Plus a per-population
+    delta. Diagnostic — always exits 0.
+
+    Cross-version selectors (`resolve_to_version:` set) are rejected in
+    v0.2; materialize each side with `select` and diff the IDs lists
+    instead."""
+    exit_code = run_diff(
+        selector_a_path=selector_a_path,
+        selector_b_path=selector_b_path,
+        anno_path=anno_path,
+        out=out,
+        fmt=fmt,
+        schema_override=schema_override,
+        allow_empty_source=allow_empty_source,
         quiet=ctx.obj["quiet"],
     )
     sys.exit(exit_code)

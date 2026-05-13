@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`aadr-subset diff SELECTOR_A.yaml SELECTOR_B.yaml ANNO.anno`** — new
+  sixth subcommand. Set-difference of two selectors against the same
+  target `.anno`: which samples does A match that B doesn't, and vice
+  versa, plus a per-population delta. Default `human` format is a
+  multi-line stdout summary (header lines with short-form selector
+  signatures, A/B/Both sample counts, per-population delta table with
+  `+N`/`-N` deltas, sample preview truncated at 10 with tail count).
+  `--format json -o PATH` writes a structured object with
+  `a_only[]` / `b_only[]` / `both[]` arrays, `per_population_delta[]`
+  rows (`{group_id, n_a, n_b, delta}`), both signatures, anno
+  metadata, schema_version. Diagnostic by design — always exits 0;
+  even an empty diff (selectors that match identically) is itself a
+  signal worth reporting. Cross-version selectors (`resolve_to_version:`
+  set on either side) are rejected with a UsageError in v0.2; the
+  workaround is to materialize each selector via `select` separately
+  and diff the resulting ID lists.
+
 - **Group_ID glob patterns** (HLD: `populations:` literal matching now
   supports fnmatch-style `*`, `?`, `[abc]`). A literal containing any of
   `*`, `?`, `[` is treated as a pattern and expanded against the target
@@ -52,6 +69,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `SelectorWarnings.deprecated_selector_keys` field (was declared in v0.1
   but never populated; obsolete now that aliases are hard errors).
+
+- **Templates refreshed with globs.** Five of six shipped templates now
+  use Group_ID glob patterns where they consolidate v62 suffix variants
+  + v66 site-fragmented labels in fewer lines. Match counts changed:
+  - `bronze_age_europe`: v62 199 → 236, v66 259 → 367 (Germany_*_BellBeaker
+    glob captures v66's site-prefixed labels).
+  - `wsh_steppe_pool`: v62 21 → 24, v66 72 → 152 (Russia_*EBA_Yamnaya*
+    glob captures dozens of country-prefixed Yamnaya variants).
+  - `iron_age_britain`: 3 literals → 2 (England_IA + England_IA.[AS]G).
+  - `viking_period_scandinavian`: explicit country list → per-country
+    globs (Norway_Viking*, Sweden_Viking*, etc.).
+  - `neolithic_anatolia`: explicit Marmara breakdown → Turkey_*Barcin*
+    / Turkey_*Catalhoyuk_*N* / etc. globs.
+  - `modern_european` unchanged — explicit reference panel labels are
+    clearer than globs that would over-match.
 
 ### Engine internals
 
