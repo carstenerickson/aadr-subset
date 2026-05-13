@@ -1,5 +1,10 @@
 # Contributing to aadr-subset
 
+New to the codebase? Read [DEVELOPMENT.md](DEVELOPMENT.md) first — it
+covers the mental model, module map, execution pipeline, and "where to
+add things" recipes. This file covers process: setup, lint, tests, PR
+rules, release.
+
 ## Development setup
 
 ```bash

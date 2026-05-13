@@ -37,12 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Stratified sampling** — cap your cohort to at most N samples per
-  Group_ID and/or per Individual_ID. Designed in
-  [cs-wiki/projects/aadr-subset-stratified-sampling.md](https://github.com/carstenerickson/claude/blob/main/cs-wiki/projects/aadr-subset-stratified-sampling.md);
-  18 LLD pins; 35 tests. Use cases: PCA balance (cap 50 per population
-  so 4,000 modern English don't swamp 50 Yamnaya), multi-library dedup
-  (`max_per_individual: 1` picks the best library per individual,
-  collapsing AADR's `.AG` / `.DG` / `.SG` triples).
+  Group_ID and/or per Individual_ID. 35 tests. Use cases: PCA balance
+  (cap 50 per population so 4,000 modern English don't swamp 50
+  Yamnaya), multi-library dedup (`max_per_individual: 1` picks the
+  best library per individual, collapsing AADR's `.AG` / `.DG` / `.SG`
+  triples).
 
   - **Selector grammar** gains a `sampling:` block:
 

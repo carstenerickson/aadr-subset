@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/carstene/aadr-subset/schemas/selector.schema.json",
+  "$id": "https://github.com/carstenerickson/aadr-subset/schemas/selector.schema.json",
   "title": "aadr-subset selector",
-  "description": "Declarative AADR panel-subset definition. Top-level keys AND-combine; `any:` provides one-level OR; `exclude:` provides one-level NOT-of-OR. Flat grammar — no nesting beyond one level. See cs-wiki/projects/aadr-subset.md for full semantics. Deprecated `master_ids:` / `master_ids_source:` aliases accepted in v0.1 with a load-time stderr warning; removed in v0.2.",
+  "description": "Declarative AADR panel-subset definition. Top-level keys AND-combine; `any:` provides one-level OR; `exclude:` provides one-level NOT-of-OR. Flat grammar — no nesting beyond one level. Deprecated `master_ids:` / `master_ids_source:` aliases accepted in v0.1 with a load-time stderr warning; removed in v0.2.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -57,7 +57,7 @@
       "$ref": "#/$defs/exclude_block"
     },
     "sampling": {
-      "description": "Stratified-sampling caps (v0.3+). Applied after predicate masks + exclude; cap is a CEILING, not a floor. Per-individual fires before per-population (see cs-wiki/projects/aadr-subset-stratified-sampling.md §4). Caps + policy enter selector_signature; resolution (the surviving sample set) does NOT — same intent-not-expansion rule as Group_ID globs.",
+      "description": "Stratified-sampling caps (v0.3+). Applied after predicate masks + exclude; cap is a CEILING, not a floor. Per-individual fires before per-population (broader-policy-second maximizes survivors when caps interact). Caps + policy enter selector_signature; resolution (the surviving sample set) does NOT — same intent-not-expansion rule as Group_ID globs.",
       "$ref": "#/$defs/sampling_spec"
     },
     "master_ids": {

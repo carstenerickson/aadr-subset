@@ -42,9 +42,8 @@ class SamplingPolicy(StrEnum):
 
     v0.3 ships TOP_COVERAGE only; JSON-schema enforces the enum at
     validate time so `policy: random` errors at the validate step,
-    not at engine runtime. RANDOM lands in v0.4+ alongside a required
-    seed field (see cs-wiki/projects/aadr-subset-stratified-sampling.md
-    §10 deferred items).
+    not at engine runtime. RANDOM is deferred until a required seed
+    field can land alongside it.
     """
 
     TOP_COVERAGE = "top_coverage"

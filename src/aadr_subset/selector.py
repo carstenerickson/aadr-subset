@@ -723,7 +723,7 @@ def compute_signature(
 
     # v0.3: sampling sub-dict. Per-field selector-vs-CLI merge; defaults
     # elided (so `policy: top_coverage` explicit and omitted produce the
-    # same signature). See aadr-subset-stratified-sampling.md §5.
+    # same signature). Same intent-not-expansion rule as Group_ID globs.
     sampling_payload: dict[str, Any] = {}
     eff_max_pop = (
         selector.sampling.max_per_population

@@ -1,8 +1,10 @@
 """Tests for stratified sampling (v0.3).
 
-Covers the 25 tests in
-cs-wiki/projects/aadr-subset-stratified-sampling.md §11 plus the
-15b positive coverage_column propagation case added in revision-1.
+Covers schema rejection cases, the engine algorithm (cap arithmetic,
+per-IID-then-per-pop ordering, NaN-coverage handling, .anno-row-order
+tie-break), CLI flag bounds, determinism across runs, signature
+inclusion (intent-not-expansion), cross-version interactions, and the
+inspect Downsampled section.
 """
 
 from __future__ import annotations

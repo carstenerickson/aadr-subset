@@ -157,8 +157,7 @@ def run_select(
 
     # 7. Compute selector signature. CLI coverage_column / sampling
     # caps inject into the signature ONLY when the selector itself
-    # doesn't pin them (selector wins per HLD §Coverage handling +
-    # aadr-subset-stratified-sampling.md §5).
+    # doesn't pin them (selector-wins-per-field merge).
     sig = compute_signature(
         selector,
         cli_coverage_column=cli_coverage_column,

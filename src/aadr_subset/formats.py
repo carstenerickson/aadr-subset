@@ -253,9 +253,9 @@ def write_json(
     out["per_population_counts"] = dict(result.per_population_counts)
     out["per_branch_counts"] = dict(result.per_branch_counts)
     out["excluded_counts"] = [asdict(ec) for ec in result.excluded_counts]
-    # v0.3: additive field per cs-wiki/aadr-subset-stratified-sampling.md §7
-    # (additive — no JSON_SCHEMA_VERSION bump). Empty list when sampling
-    # wasn't active OR was active but matched no candidates to drop.
+    # v0.3: additive field — no JSON_SCHEMA_VERSION bump because old
+    # consumers ignoring the new key continue to work. Empty list when
+    # sampling wasn't active OR was active but matched no candidates to drop.
     out["sampling_drops"] = [asdict(sd) for sd in result.sampling_drops]
 
     if include_matched_criteria and result.matched_criteria:
