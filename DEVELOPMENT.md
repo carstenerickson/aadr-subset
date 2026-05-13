@@ -37,8 +37,13 @@ flowchart LR
 ```
 
 `compute_signature` reads the `Selector` directly (not the
-`SubsetResult`); `run_select` attaches the resulting hash to the
-result via `dataclasses.replace` before handing it to the writers.
+`SubsetResult`); it also takes the CLI fallback inputs
+(`cli_coverage_column`, `cli_max_per_population`,
+`cli_max_per_individual`) which enter the signature payload only when
+the selector itself doesn't pin them (the per-field selector-wins
+merge — diagrammed as a single `Selector → sig` edge for clarity).
+`run_select` attaches the resulting hash to the result via
+`dataclasses.replace` before handing it to the writers.
 
 Three things to internalize:
 
@@ -75,10 +80,15 @@ Three things to internalize:
 | `commands/{validate,select,inspect,report,diff,template}_cmd.py` | One orchestrator per subcommand. Each `run_*` takes flat kwargs and returns an int exit code. | ~40-390 each |
 
 The dep graph is acyclic. `types.py` and `errors.py` are leaves;
-`selector.py` and `engine.py` depend only on those two (plus
-`aadr_resolve` for `engine`); `formats.py` and `reporting.py` depend
-on the data layer plus `aadr_resolve`; `commands/*` depend on
-everything and are imported only by `cli.py`.
+`selector.py` depends on them plus the JSON Schema; `engine.py`
+depends on them plus `aadr_resolve`; `formats.py` depends on them
+plus `aadr_resolve` (the latter only inside `write_json` to record
+the running version); `reporting.py` depends on them plus
+`formats.atomic_write` (no runtime `aadr_resolve` dep — `AnnoFrame`
+is `TYPE_CHECKING`-only); `templates.py` depends on `selector` and
+`errors`; `commands/*` depend on everything below and are imported
+only by `cli.py` (which itself also imports `selector` for
+`format_validation_errors`).
 
 ```mermaid
 graph TD
@@ -95,6 +105,7 @@ graph TD
   aadr_resolve(["aadr_resolve<br/>(external PyPI dep)"])
 
   cli --> commands
+  cli --> selector
   cli --> errors
 
   commands --> selector
@@ -102,6 +113,7 @@ graph TD
   commands --> formats
   commands --> reporting
   commands --> templates
+  commands --> types
   commands --> errors
 
   selector --> types
@@ -112,14 +124,16 @@ graph TD
   engine --> errors
   engine --> aadr_resolve
 
+  templates --> selector
   templates --> types
+  templates --> errors
 
   formats --> types
   formats --> errors
   formats --> aadr_resolve
 
+  reporting --> formats
   reporting --> types
-  reporting --> aadr_resolve
 
   classDef external fill:#eef,stroke:#88a,stroke-dasharray:5 3
   class aadr_resolve external
@@ -164,11 +178,13 @@ flowchart TD
   class q0,s0,q4b,s4b optional
 ```
 
-The two yellow conditionals are the only branching: the cross-version
+The two yellow conditionals are the main branches: the cross-version
 IID lift fires only when `resolve_to_version:` is in the selector, and
 the sampling reduction fires only when a sampling spec (selector-side
 or via CLI) is present. The masks chain (steps 1–4) and the accounting
-block (5–9) always run.
+core (steps 5–8) always run; step 9 (`matched_criteria`) is an
+additional opt-in inside the accounting block, gated on `select`'s
+`--include-matched-criteria` flag.
 
 0. **Cross-version IID lift** — if `selector.resolve_to_version` is set,
    call `aadr_resolve.resolve_master_ids` to lift the selector's source
