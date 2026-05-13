@@ -51,18 +51,18 @@ short of swapping `.ind` files.
 - **Cross-version via `aadr-resolve`.** `resolve_to_version:` lifts
   Individual_IDs from an older release to the newer one through the
   GID-stable bridge + MID-rename map.
-- **Five subcommands** cover the full lifecycle: `validate`, `select`,
-  `inspect`, `report`, `template`.
+- **Six subcommands** cover the full lifecycle: `validate`, `select`,
+  `inspect`, `report`, `diff`, `template`.
 
 ## Install
 
 ```bash
-pip install aadr-subset            # once PyPI'd; currently:
-pip install git+https://github.com/carstenerickson/aadr-subset.git
+pip install aadr-subset
 ```
 
-Python 3.11+. The only external dependency is `aadr-resolve` (also
-installed via git URL until both ship to PyPI).
+Python 3.11+. The only external dependency is
+[aadr-resolve](https://github.com/carstenerickson/aadr-resolve),
+pulled in automatically.
 
 For development:
 
@@ -98,6 +98,16 @@ write matched sample IDs / TSV / JSON.
 aadr-subset select britain_iron_age.yaml v66.HO.aadr.PUB.anno -o cohort.ids
 aadr-subset select britain_iron_age.yaml v66.HO.aadr.PUB.anno --format tsv -o cohort.tsv
 aadr-subset select britain_iron_age.yaml v66.HO.aadr.PUB.anno --format json -o cohort.json
+```
+
+Stratified sampling caps can be specified inline on the CLI (or in the
+selector YAML — selector wins per-field):
+
+```bash
+# cap to 1 library per individual (dedup .AG/.SG/.DG triplicates),
+# then at most 50 samples per population
+aadr-subset select europe_neolithic.yaml v66.HO.aadr.PUB.anno \
+    --max-per-individual 1 --max-per-population 50 -o cohort.ids
 ```
 
 Cross-version flow (selector defined against an older release than the
@@ -146,6 +156,21 @@ Date range of matched: 1934 - 2398 calBP (median 2103)
 Coverage range:        0.34 - 4.81x (median 1.28)
 
 Selector signature: sha256:1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e
+```
+
+When sampling caps are active a "Downsampled" section appears (v0.3+):
+
+```
+$ aadr-subset inspect europe_neolithic.yaml v66.HO.aadr.PUB.anno \
+      --max-per-individual 1 --max-per-population 50
+...
+Matched: 312 samples across 8 populations  (before sampling: 489)
+
+Downsampled:
+  Per-individual (max 1): dropped 177 samples across 177 individuals
+  Per-population (max 50):
+    Anatolia_N   dropped 12  (62 → 50)
+    Iran_N       dropped  8  (58 → 50)
 ```
 
 ### `report SELECTOR.yaml ANNO.anno [-o PATH] [--format tsv|json]`
