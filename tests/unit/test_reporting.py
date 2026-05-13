@@ -42,7 +42,7 @@ def test_summary_inline_form_under_threshold(tmp_path: Path) -> None:
         anno=anno,
     )
     assert "Per-population: Western_HG=3" in summary
-    assert "Matched 3 samples across 1 populations." in summary
+    assert "Matched 3 samples across 1 population." in summary
     assert "Done in 0.61s" in summary
     assert "Wrote out.ids (3 lines)" in summary
 

@@ -8,11 +8,11 @@ cross-AADR-version sample-ID mapping.
 
 ```yaml
 # britain_iron_age.yaml
-populations: [England_IA, England_IA.AG, England_IA.SG]
+populations: ["England_IA*"]   # matches England_IA + v62 .AG/.SG/.DG variants
 date: {min_calbp: 1900, max_calbp: 2400}
-min_coverage: 0.3
+min_coverage: 0.3              # 1240k-target coverage (unitless ratio)
 exclude:
-  individual_ids: [I12345]   # known contaminated sample
+  individual_ids: [I12345]     # known contaminated sample
 ```
 
 ```bash
@@ -20,7 +20,7 @@ $ aadr-subset select britain_iron_age.yaml v66.HO.aadr.PUB.anno -o cohort.ids
 Selector: britain_iron_age.yaml (sha256:1a2b3c4...d5e6f7g)
 .anno:    v66.HO.aadr.PUB.anno (v66.0, class E)
 
-Matched 45 samples across 1 populations.
+Matched 45 samples across 1 population.
 
 Per-population: England_IA=45
 
@@ -119,6 +119,10 @@ aadr-subset select britain_v62_lift.yaml v66.HO.aadr.PUB.anno \
     -o lifted.ids
 ```
 
+The positional `.anno` is the **target** (where the lifted cohort
+materializes); `--source-anno` is the **source** (where the selector's
+Individual_IDs are originally defined). `aadr-resolve` bridges the two.
+
 v62.0 inputs (class D — no native coverage column) need a derived proxy
 for `min_coverage:` filters:
 
@@ -151,19 +155,21 @@ Coverage range:        0.34 - 4.81x (median 1.28)
 Selector signature: sha256:1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4x5y6z7a8b9c0d1e
 ```
 
-When sampling caps are active a "Downsampled" section appears (v0.3+):
+When sampling caps are active a "Downsampled" section appears (v0.3+).
+Per-population entries are listed individually; per-individual drops
+are aggregated (they can run into the thousands; the JSON output
+preserves per-IID detail for callers that need it):
 
 ```
 $ aadr-subset inspect europe_neolithic.yaml v66.HO.aadr.PUB.anno \
       --max-per-individual 1 --max-per-population 50
 ...
-Matched: 312 samples across 8 populations  (before sampling: 489)
+Matched: 312 samples across 8 populations
 
 Downsampled:
-  Per-individual (max 1): dropped 177 samples across 177 individuals
-  Per-population (max 50):
-    Anatolia_N   dropped 12  (62 → 50)
-    Iran_N       dropped  8  (58 → 50)
+  Anatolia_N  12 samples dropped
+  Iran_N       8 samples dropped
+  per-individual aggregate: 177 samples dropped across 177 individual(s)
 ```
 
 ### `report SELECTOR.yaml ANNO.anno [-o PATH] [--format tsv|json]`
@@ -198,10 +204,13 @@ B only: 12 samples
 Both:   38 samples
 
 Per-population delta:
-  group_id          A   B  delta
-  England_IA       43  40     -3
-  England_IA-o      0  10    +10
-  England_BellBeaker  0   2     +2
+  group_id             A   B  delta
+  England_IA          43  40     -3
+  England_IA-o         0  10    +10
+  England_BellBeaker   0   2     +2
+
+A only sample preview: ['I12345', 'I12346', 'I12347', 'I12348', 'I12349']
+B only sample preview: ['I20001', 'I20002', ...] (+2 more)
 ```
 
 `--format json -o diff.json` writes a structured object with
@@ -238,8 +247,9 @@ resolves to non-zero matches against.
 | 0 | Success |
 | 1 | Soft validation failure (e.g. zero-match without `--allow-empty`, `--strict-resolve` missing IIDs) |
 | 2 | I/O failure (file not found, `.anno` schema unrecognized, etc.) |
+| 3 | Invariant violation (internal consistency check failed — please file an issue) |
 | 4 | Usage error (schema violation, flag misuse, unknown template) |
-| 70 | Internal error (please file an issue) |
+| 70 | Internal error (uncaught exception escape hatch — please file an issue) |
 
 ## Selector grammar (overview)
 
@@ -247,7 +257,7 @@ Flat — one level of nesting maximum. Top-level keys AND-combine.
 
 ```yaml
 # Top-level AND
-populations: [Western_HG, "England_*"]   # group_id literals + fnmatch globs (v0.2)
+populations: [Western_HG, "England_*"]   # group_id literals + fnmatch globs (v0.2+)
 individual_ids: [Loschbour, KO1]         # match against individual_id
 individual_ids_source: ids.txt           # newline-delimited file
 modern_only: true                        # shorthand: date_calbp <= 70
@@ -300,7 +310,11 @@ class-D inputs (v62.0, no native coverage column), sampling requires
 errors out (the engine refuses to "prioritize" against an undefined
 coverage column).
 
-Full spec: [aadr-subset HLD](https://github.com/carstenerickson/aadr-subset/blob/main/docs/hld.md).
+For the full grammar reference see the [JSON
+Schema](src/aadr_subset/schemas/selector.schema.json); for grammar
+semantics and edge cases (NaN handling, branch independence, signature
+canonicalization) see the inline schema `description:` fields and the
+[CHANGELOG](CHANGELOG.md).
 
 ## Composing with `plink2`
 

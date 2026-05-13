@@ -6,6 +6,7 @@
 git clone https://github.com/carstenerickson/aadr-subset.git
 cd aadr-subset
 pip install -e ".[dev]"
+aadr-subset --version    # sanity-check the editable install
 ```
 
 ## Running the test suite
@@ -32,16 +33,18 @@ Python 3.11, 3.12, and 3.13 across Ubuntu and macOS.
 
 ```
 src/aadr_subset/
+  __main__.py     # `python -m aadr_subset` entry-point
   cli.py          # click entry-point; wires flags → command modules
   commands/       # one module per subcommand (select, inspect, report, diff, …)
   engine.py       # core selection + sampling algorithm
   selector.py     # YAML → Selector dataclass + signature computation
   types.py        # shared dataclasses (Selector, SubsetResult, SamplingSpec, …)
   formats.py      # output writers (ids / tsv / json)
-  reporting.py    # inspect / report human-readable formatting
+  reporting.py    # inspect / report / diff human-readable formatting
   schemas/        # selector.schema.json (JSON Schema for selector YAML)
   templates/      # shipped starter selectors (*.yaml)
-  errors.py       # typed exception hierarchy
+  templates.py    # loader / lister for the templates/ directory
+  errors.py       # typed exception hierarchy + EXIT_* constants
 tests/
   unit/           # fast, no filesystem; FakeAnnoFrame fixtures
   integration/    # real .anno fixture files; slower
@@ -56,8 +59,9 @@ tests/
 - Selector grammar additions require a JSON Schema update in
   `schemas/selector.schema.json` and a `tested_against:` bump in any
   affected shipped templates.
-- Update `CHANGELOG.md` under `[Unreleased]` for every user-visible
-  change.
+- Update `CHANGELOG.md` under the `[Unreleased]` section for every
+  user-visible change. (If that section doesn't exist — e.g. the
+  previous version was just released — add it back at the top.)
 - The selector signature is a public contract — changes that alter the
   canonical form for existing selectors are breaking and need a major
   version bump discussion.
@@ -70,5 +74,6 @@ Releases are cut from `main` by the maintainer:
    (drop `.devN` suffix).
 2. Replace `[Unreleased]` with `[X.Y.Z] — YYYY-MM-DD` in `CHANGELOG.md`.
 3. Commit, push, tag: `git tag -a vX.Y.Z -m "aadr-subset vX.Y.Z"`.
-4. Push the tag — the release workflow builds, smoke-tests (6-matrix),
-   and publishes to PyPI via OIDC.
+4. Push the tag — the release workflow builds the sdist + wheel,
+   smoke-tests across 6 jobs (Python 3.11 / 3.12 / 3.13 × Ubuntu /
+   macOS), and publishes to PyPI via trusted-publisher OIDC.

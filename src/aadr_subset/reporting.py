@@ -73,7 +73,8 @@ def format_stdout_summary(
     lines.append(f"Selector: {selector_file}{sig_tail}")
     lines.append(f".anno:    {anno.path} ({anno.version}, class {anno.schema_class.value})")
     lines.append("")
-    lines.append(f"Matched {result.n_matched} samples across {pop_count} populations.")
+    pop_word = "population" if pop_count == 1 else "populations"
+    lines.append(f"Matched {result.n_matched} samples across {pop_count} {pop_word}.")
     if n_excluded > 0:
         n_conditions = len(result.excluded_counts)
         cond_word = "condition" if n_conditions == 1 else "conditions"
