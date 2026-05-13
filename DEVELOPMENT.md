@@ -30,9 +30,10 @@ YAML selector ──► selector.load_selector ──► Selector (dataclass)
                                 ┌─────────────────┼─────────────────┐
                                 ▼                 ▼                 ▼
                          formats.py        reporting.py     selector.compute_signature
-                         (write_ids /      (format_*_summary    (RFC 8785 JCS
-                          write_tsv /      for stderr)           SHA-256)
-                          write_json)
+                         (write_ids /      (human summaries     (RFC 8785 JCS
+                          write_tsv /       to stderr +          SHA-256)
+                          write_json)       write_report_* /
+                                            write_diff_json)
 ```
 
 Three things to internalize:
@@ -77,7 +78,10 @@ and `reporting.py` depend on the data layer plus `aadr_resolve`;
 ## The execution pipeline (engine.select_samples)
 
 The full algorithm is in `engine.select_samples` (~210 lines, well
-commented). The numbered steps in the docstring match the code blocks:
+commented). Step numbering below matches the `# N.` comments in the
+code; v0.3 inserted sampling between the pre-sampling mask and the
+materialize step as **step 4b** so existing pin numbers (5+ in the
+code) didn't shift.
 
 0. **Cross-version IID lift** — if `selector.resolve_to_version` is set,
    call `aadr_resolve.resolve_master_ids` to lift the selector's source
@@ -90,21 +94,28 @@ commented). The numbered steps in the docstring match the code blocks:
 2. **`any:` OR mask** — `_build_any_or_mask` produces one sub-mask per
    branch and ORs them. Absent `any:` block yields all-True.
 3. **`exclude:` NOT-of-OR mask** — same shape as `any:` but inverted.
-4. **`candidates_mask = top_and & any_or & exclude_keep`**
-5. **(v0.3) Stratified sampling** — `_apply_sampling` runs the
-   per-individual cap first, then the per-population cap. Both work by
-   sorting within each group by `af.coverage` descending (NaN sinks),
-   taking the top N. The pre-sampling mask becomes `final_mask`.
-6. **Materialize + dedup** — `anno.genetic_id[final_mask]` → list;
+4. **`candidates_mask = top_and & any_or & exclude_keep`** — the
+   pre-sampling final mask.
+4b. **(v0.3) Stratified sampling** — `_apply_sampling` runs the
+    per-individual cap first, then the per-population cap. Both
+    prioritize via `_coverage_series(af, coverage_column)` (so the
+    effective coverage column — selector override > CLI override > native
+    `af.coverage` — drives ranking), sort descending with NaN sinking
+    last, and take the top N. Stable sort means ties break on `.anno`
+    row order. NaN-`group_id` rows bypass the per-population cap (no
+    sensible "group" to cap within); they still participate in the
+    per-individual cap. The output is `final_mask`.
+5. **Materialize + dedup** — `anno.genetic_id[final_mask]` → list;
    `_dedup_preserve_order` handles the (defensive) GID-uniqueness check.
-7. **Per-population counts** — built from the matched group_ids in
+6. **Per-population counts** — built from the matched group_ids in
    first-appearance order.
-8. **Per-branch counts** — `_compute_per_branch_counts`, AND-ed with
+7. **Per-branch counts** — `_compute_per_branch_counts`, AND-ed with
    `final_mask` so sampling-dropped rows don't inflate any branch's count.
-9. **Excluded counts** — one row per exclusion *condition* (literal or
+8. **Excluded counts** — one row per exclusion *condition* (literal or
    expanded glob), independent of overlap with the matched set.
-10. **Optional `matched_criteria`** — opt-in via
-    `--include-matched-criteria` (it's O(n × predicates), so off by default).
+9. **Optional `matched_criteria`** — opt-in via `select`'s
+   `--include-matched-criteria` flag (it's O(n × predicates), so off by
+   default; `inspect` and `report` don't expose it).
 
 ### Tri-state populations (important)
 
@@ -132,11 +143,20 @@ The signature hashes the **pattern**, not the expanded set (see below).
 ### `Selector` (types.py)
 
 The parsed user intent. Construct via `load_selector(path)` — direct
-construction is for test fixtures only. All optional fields default to
-their "absent" form (`None` for scalars, `[]` for list-typed predicates,
-`None` for `DateRange` / `ExcludeBlock` / `SamplingSpec`).
+construction is for test fixtures only.
 
-Subtle field semantics:
+Absent-vs-present discipline (subtle and important):
+- **Scalar fields** (`min_coverage`, `modern_only`, etc.) → `None` for
+  absent; an actual value for present.
+- **Sub-block fields** (`date`, `exclude`, `sampling`) → `None` for
+  absent; an instance of the sub-dataclass for present.
+- **List-typed predicate fields** (`populations`, `individual_ids`,
+  `exclude.group_ids`, …) → `[]` for absent. The JSON Schema rejects
+  present-but-empty lists in YAML, so the only way to get `[]` at this
+  layer is "field omitted from the YAML." Engine code reads `[]` as
+  "no constraint set for this field."
+
+Subtle ID-source-file semantics:
 - `individual_ids` is the YAML-inline list.
 - `individual_ids_source` is a Path to a newline-delimited file.
 - `individual_ids_from_source` is the parsed contents of the file.
@@ -146,21 +166,26 @@ Subtle field semantics:
 ### `SubsetResult` (types.py)
 
 The engine's return value. Frozen, slotted. The writers and reporters
-read it; they never mutate it (`replace()` is used to attach
-post-engine run-env metadata in `select_cmd.run_select`).
+read it; they never mutate it. Where a caller needs to "add a field"
+(e.g. `select_cmd.run_select` attaching `anno_version` /
+`selector_signature` post-engine), it uses `dataclasses.replace(result,
+field=value, …)` — the stdlib pattern for constructing a new frozen
+dataclass from an existing one with overrides.
 
 ### `AnnoFrame` (aadr_resolve)
 
-Not ours — vendored from `aadr-resolve` and treated as a black-box
-dataframe wrapper. Test code stands in with `FakeAnnoFrame`
+Not ours — an external PyPI dependency from `aadr-resolve`, treated as
+a black-box dataframe wrapper. Test code stands in with `FakeAnnoFrame`
 (`tests/unit/test_engine.py`) duck-typing the accessors we use.
 
 ## The selector signature contract
 
 `selector.compute_signature(selector, *, cli_coverage_column, cli_max_per_population, cli_max_per_individual)`
 is the **public contract** that defines reproducibility. It produces
-`"sha256:" + hexdigest(rfc8785.dumps(payload))` where `payload` is
-built per LLD §3.3:
+`"sha256:" + hashlib.sha256(rfc8785.dumps(payload)).hexdigest()` where
+the `payload` dict is built per these rules (referenced as "LLD §3.3"
+in `selector.py`; the historical design pins from build-time live in
+inline comments now):
 
 - Set-like lists (`populations`, `individual_ids`, `exclude.group_ids`,
   `exclude.individual_ids`) are sorted-deduped to break input ordering noise.
@@ -187,6 +212,10 @@ because elided keys don't enter the payload.
 
 ## Where to add things
 
+Every recipe below ends with a `CHANGELOG.md` entry under
+`[Unreleased]` (recreate that section if the previous version was
+just released).
+
 ### A new filter predicate (e.g. `min_n_snps_hit`)
 
 1. Add the field to `Selector` (and `AnyBranch` if it should work in
@@ -196,7 +225,10 @@ because elided keys don't enter the payload.
    plus add it to the `_check_semantic_constraints` function in
    `selector.py` if it interacts with another field.
 3. Parse it in `_build_selector` (`selector.py`) → set the field on the
-   returned `Selector`.
+   returned `Selector`. If you're *renaming* an existing field rather
+   than adding one, extend `_DEPRECATED_ALIASES` so old YAMLs still
+   load (with a stderr warning) for at least one minor version before
+   removal — `master_ids` → `individual_ids` was handled this way.
 4. Build a sub-mask in `_build_predicate_mask` (`engine.py`); add it to
    the masks list when the field is set.
 5. If the field should appear in `any:` branches, mirror the construction
@@ -206,15 +238,22 @@ because elided keys don't enter the payload.
 7. Tests: unit tests in `tests/unit/test_engine.py` for the mask
    behavior, `test_signature_canonicalization.py` for the signature,
    `test_schema_validation.py` for the schema reject cases.
+8. Update `CHANGELOG.md` under `[Unreleased]`.
 
 ### A new subcommand
 
 1. Add `src/aadr_subset/commands/<name>_cmd.py` exposing `run_<name>(**kwargs) -> int`.
+   Thread `quiet` through if your subcommand writes a stderr summary
+   (top-level `--quiet` should suppress it; see existing commands for
+   the pattern).
 2. Register it in `cli.py` with `@cli.command("<name>")` + click options;
    the body calls `run_<name>(**)` and `sys.exit(exit_code)`.
-3. Add an entry to the README "subcommands" section.
+3. Add an entry to the README's subcommands section — and bump the
+   section heading count ("The six subcommands" → "The seven
+   subcommands"), plus the bullet in the *Why it exists* list.
 4. Tests: unit test the orchestrator (`tests/unit/test_<name>_cli.py`)
    via `click.testing.CliRunner`.
+5. Update `CHANGELOG.md` under `[Unreleased]`.
 
 ### A new output format
 
@@ -225,18 +264,42 @@ because elided keys don't enter the payload.
 3. Add a branch in `write_select_output`'s dispatch.
 4. Extend `format_stdout_summary`'s "Wrote …" line if the new format
    reports differently.
+5. If you change the JSON output's *shape* (rather than just adding
+   a new format), bump `formats.JSON_SCHEMA_VERSION` and update the
+   key-order test (`tests/unit/test_formats_tsv_json.py`).
+6. Update `CHANGELOG.md` under `[Unreleased]`.
 
 ### A new shipped template
 
-1. Drop `templates/<name>.yaml` with a two-document YAML: metadata
-   header (`tested_against`, `last_verified`, `maintainer`, `notes`)
-   then the selector body (the form `template <name>` will emit).
-2. Verify it produces non-zero matches against the AADR versions in
+A shipped template is a **two-document YAML**, separated by `---`:
+
+```yaml
+# Brief commentary about what this cohort represents.
+tested_against: [v62.0, v66.0]   # AADR versions where this resolves non-empty
+last_verified: '2026-05-12'      # ISO date (string-quoted)
+maintainer: aadr-subset          # or your name
+notes: |
+  Free-form block-scalar prose. Explain edge cases, suggested edits,
+  coverage-column requirements. Surfaces in `template <name>` output.
+---
+# Body — the actual selector YAML the user gets a copy of.
+populations: ["..."]
+date: {min_calbp: ..., max_calbp: ...}
+...
+```
+
+Steps:
+
+1. Drop `templates/<name>.yaml` with the two-doc structure above. The
+   metadata keys (`tested_against` / `last_verified` / `maintainer` /
+   `notes`) all map onto `types.SelectorMetadata`.
+2. Verify it produces non-zero matches against every AADR version in
    `tested_against:` — `tests/integration/test_templates_against_real_anno.py`
    asserts this for every shipped template (gated on the integration
    `.anno` fixtures being available).
 3. The `templates.py` lister picks up any `*.yaml` in the directory; no
    code change required.
+4. Update `CHANGELOG.md` under `[Unreleased]`.
 
 ### A new schema class (v66 adds a new class F, say)
 
@@ -251,19 +314,42 @@ But when a class lands there, audit:
 ## Error & exit-code model
 
 `errors.py` defines a single exception hierarchy. The CLI top-level
-handler in `cli.py` catches `AadrSubsetError` and maps to `exit_code`.
+handler is `cli.main()` (the entry point registered as
+`aadr-subset = "aadr_subset.cli:main"` in `pyproject.toml`); it wraps
+`cli(standalone_mode=False)` in a try/except block that catches
+`AadrSubsetError` subclasses and maps to `exit_code`.
 
 | Exception | Exit | When to raise |
 |---|---|---|
+| (success) | 0 | `EXIT_SUCCESS`. |
 | `SoftValidationFailure` | 1 | The engine ran and got an answer, but the answer isn't shippable. Zero-match without `--allow-empty`, `--strict-resolve` with missing IIDs. |
 | `IOFailure` | 2 | `.anno` unreadable, schema unrecognized, can't write output, sampling on class-D without `--coverage-derive`. |
 | `InvariantViolation` | 3 | Internal consistency check failed — e.g. cross-version lift called without a source `AnnoFrame`. Signals a bug, not user error. |
 | `UsageError` | 4 | YAML schema violation, semantic-constraint violation, flag misuse. Carries a `list[ValidationError]` payload for the formatter. |
 | (uncaught) | 70 | Escape hatch for genuine bugs. BSD `EX_SOFTWARE`. The CLI handler logs the traceback. |
+| (Ctrl-C / `click.exceptions.Abort`) | 130 | Conventional SIGINT exit code. `main()` handles this explicitly. |
 
-Click's own usage errors (bad flag) exit 2 by default — we override to
-4 in `cli.py`'s `_click_exception_handler` so all usage-style failures
-share an exit code.
+Click's own usage errors (bad flag, wrong arg count) exit 2 by default;
+`main()` intercepts `click.UsageError` and overrides to 4 so all
+usage-style failures share an exit code.
+
+## stdout vs stderr discipline
+
+Strict separation, so pipelines compose:
+
+- **stdout** — only data the user asked for. Selector matches (IDs /
+  TSV / JSON) when `-o` is omitted; report rows when `-o` is omitted;
+  diff body when `-o` is omitted. Tools downstream (`plink2 --keep`,
+  `jq`, `wc -l`) read this stream.
+- **stderr** — summaries, warnings, validation errors, the `Wrote …`
+  / `Done in …` lines. Suppressible with top-level `--quiet`.
+
+Concretely: `format_stdout_summary` (despite the name — historical)
+writes to **stderr** in `select_cmd`. `write_select_output` writes the
+matched-IDs / TSV / JSON to **stdout** when `out_path is None`, or
+atomically to the `-o` path otherwise. Adding a subcommand: route
+data to stdout, narration to stderr, and honor `--quiet` on the
+narration path.
 
 ## Testing strategy
 
@@ -284,10 +370,41 @@ Some tests are gated `@pytest.mark.slow` or `@pytest.mark.external_tool`
 and excluded from the default `pytest` run; CI's default suite is the
 quick path. Coverage gate at 90% line coverage.
 
+Shared pytest fixtures live in `tests/conftest.py`. The two most
+useful: `selector_dir` (a tmp_path-scoped directory to drop selector
+YAMLs in) and `write_yaml(path, content)` (one-line YAML file builder).
+Use them in unit tests instead of hand-rolling `tmp_path /
+"selector.yaml"`-style boilerplate.
+
 When adding tests, the unit-tier `FakeAnnoFrame` is almost always
 enough. Reach for the synthesizer when you're touching schema-class
 detection, the cross-version lift, or the atomic-write behavior — any
 case where the actual `.anno` parsing matters.
+
+### Manual end-to-end check
+
+Useful smoke test when poking around. Build a tiny `.anno` + selector
+in a scratch directory and run the CLI against it:
+
+```bash
+python -c "
+from pathlib import Path
+from tests.fixtures.synthesize import SynthRow, write_class_e_anno
+rows = [
+    SynthRow(genetic_id='I001', individual_id='I001', group_id='Iberia_BA',
+             date_calbp=4000, coverage=1.2),
+    SynthRow(genetic_id='I002', individual_id='I002', group_id='Iberia_BA',
+             date_calbp=4200, coverage=0.5),
+]
+write_class_e_anno(Path('/tmp/demo.anno'), rows)
+Path('/tmp/demo.yaml').write_text('populations: [Iberia_BA]\nmin_coverage: 0.3\n')
+"
+aadr-subset select /tmp/demo.yaml /tmp/demo.anno --format json | jq
+```
+
+For larger sanity checks against real `.anno` files, the integration
+tests under `tests/integration/` are the reference — they exercise the
+full file-on-disk path that unit tests skip.
 
 ## What's NOT in the code
 
@@ -312,6 +429,25 @@ A few things you might look for and not find:
 
 - **A plugin system**: also by design. The grammar is small and
   PR-reviewable. New features land as core schema additions.
+
+## A note on the `aadr-resolve` dependency
+
+`aadr-resolve` is pinned in `pyproject.toml`'s `[project] dependencies`.
+The cross-version IID lift, schema-class detection, and
+`AnnoFrame.coverage_via(column)` accessors all live in that library —
+when you bump its pin, audit:
+
+- The schema-class enum (`af.schema_class.value`) — the class-D guard
+  in `_apply_sampling` and the v62 coverage warning in
+  `select_cmd._emit_v62_coverage_warning_if_needed` both hard-code
+  `"D"`.
+- `resolve_master_ids` signature changes — `engine._resolve_cross_version`
+  wraps it.
+- New `.anno` columns — `_coverage_series` may need a new branch if a
+  new canonical coverage column lands.
+
+`aadr-subset` and `aadr-resolve` are designed to ship together; treat a
+major-version bump on either as a coordinated change.
 
 ## Quick reference: where to look for X
 
