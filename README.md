@@ -64,14 +64,7 @@ Python 3.11+. The only external dependency is
 [aadr-resolve](https://github.com/carstenerickson/aadr-resolve),
 pulled in automatically.
 
-For development:
-
-```bash
-git clone https://github.com/carstenerickson/aadr-subset.git
-cd aadr-subset
-pip install -e ".[dev]"
-pytest
-```
+For development setup see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## The six subcommands
 
