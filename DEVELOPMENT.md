@@ -286,9 +286,7 @@ a black-box dataframe wrapper. Test code stands in with `FakeAnnoFrame`
 `selector.compute_signature(selector, *, cli_coverage_column, cli_max_per_population, cli_max_per_individual)`
 is the **public contract** that defines reproducibility. It produces
 `"sha256:" + hashlib.sha256(rfc8785.dumps(payload)).hexdigest()` where
-the `payload` dict is built per these rules (referenced as "LLD §3.3"
-in `selector.py`; the historical design pins from build-time live in
-inline comments now):
+the `payload` dict is built per these rules:
 
 - Set-like lists (`populations`, `individual_ids`, `exclude.group_ids`,
   `exclude.individual_ids`) are sorted-deduped to break input ordering noise.
@@ -513,14 +511,14 @@ full file-on-disk path that unit tests skip.
 
 A few things you might look for and not find:
 
-- **`docs/hld.md` / `docs/lld.md`**: there isn't one. Inline comments
-  reference `HLD §<section>` / `LLD §<pin>` because that's how the
-  design was tracked during build, but no separate design doc is
-  checked in. **The code comments and the `CHANGELOG.md` entries are
-  the source of truth for design intent.** When you see an `HLD §X`
-  or `LLD §X` reference, look at the surrounding code + the
-  CHANGELOG entry for the version that introduced the feature — those
-  together are the design.
+- **A separate design document.** There isn't one. Code comments
+  occasionally reference numbered "design pins" from the build-time
+  design notes (e.g. "per pin §3.6", "per the date-handling pin")
+  but no separate document is checked in. **The code comments and
+  the `CHANGELOG.md` entries are the source of truth for design
+  intent.** When you see a `§N`-style reference in a comment, look
+  at the surrounding code + the CHANGELOG entry for the version that
+  introduced the feature — those together are the design.
 
 - **A logging framework**: stderr writes for warnings, stdout for
   output. The tool is short-lived and shell-composable; structured
