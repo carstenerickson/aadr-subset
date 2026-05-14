@@ -27,7 +27,7 @@ from ._cmd_helpers import (
     resolve_cross_version_inputs,
 )
 from .engine import select_samples
-from .errors import SoftValidationFailure
+from .errors import IOFailure, SoftValidationFailure, UsageError, ValidationError
 from .selector import compute_signature, load_selector
 from .types import Selector, SubsetResult
 
@@ -134,10 +134,8 @@ def select(
                 schema_override=schema_override_enum,
             )
         except aadr_resolve.SchemaDetectionError as e:
-            from .errors import IOFailure
             raise IOFailure(f"AADR .anno schema unrecognised: {e}") from e
         except (OSError, aadr_resolve.IOFailure) as e:
-            from .errors import IOFailure
             raise IOFailure(f"cannot load .anno at {anno_path}: {e}") from e
         anno_file_str = str(anno_path)
 
@@ -242,8 +240,6 @@ def _validate_cross_version_preloaded(
     Mirrors the checks inside resolve_cross_version_inputs but skips the
     loading step (already done by the caller).
     """
-    from .errors import UsageError, ValidationError
-
     if selector.resolve_to_version is None:
         # source_anno supplied but selector has no resolve_to_version.
         raise UsageError(

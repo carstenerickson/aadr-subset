@@ -1,4 +1,4 @@
-"""Unit tests for reporting.format_stdout_summary + format_inspect_summary."""
+"""Unit tests for reporting.format_run_summary + format_inspect_summary."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import aadr_resolve
 
-from aadr_subset.reporting import format_inspect_summary, format_stdout_summary
+from aadr_subset.reporting import format_inspect_summary, format_run_summary
 from aadr_subset.types import (
     ExcludeCount,
     SubsetResult,
@@ -20,7 +20,7 @@ def _v66_anno(tmp_path: Path) -> aadr_resolve.AnnoFrame:
     return aadr_resolve.AnnoFrame.from_path(p, version_label="v66.0")
 
 
-# --- format_stdout_summary ---
+# --- format_run_summary ---
 
 
 def test_summary_inline_form_under_threshold(tmp_path: Path) -> None:
@@ -32,7 +32,7 @@ def test_summary_inline_form_under_threshold(tmp_path: Path) -> None:
         per_population_counts={"Western_HG": 3},
         per_branch_counts={"top_level": 3},
     )
-    summary = format_stdout_summary(
+    summary = format_run_summary(
         result,
         parse_time=0.5,
         eval_time=0.1,
@@ -57,7 +57,7 @@ def test_summary_columnar_form_at_threshold(tmp_path: Path) -> None:
         per_population_counts=per_pop,
         per_branch_counts={"top_level": 15},
     )
-    summary = format_stdout_summary(
+    summary = format_run_summary(
         result,
         parse_time=0.1,
         eval_time=0.01,
@@ -83,7 +83,7 @@ def test_summary_excluded_line(tmp_path: Path) -> None:
         per_branch_counts={"top_level": 1},
         excluded_counts=[ExcludeCount(key="group_ids", value="Eastern_HG", count=2)],
     )
-    summary = format_stdout_summary(
+    summary = format_run_summary(
         result,
         parse_time=0.1,
         eval_time=0.01,
@@ -104,7 +104,7 @@ def test_summary_signature_short_form(tmp_path: Path) -> None:
         n_matched=1,
         selector_signature=sig,
     )
-    summary = format_stdout_summary(
+    summary = format_run_summary(
         result,
         parse_time=0.1,
         eval_time=0.01,
@@ -121,7 +121,7 @@ def test_summary_no_signature_line_when_empty(tmp_path: Path) -> None:
     """selector_signature empty (Day-4 pre-signature) → no signature tail."""
     anno = _v66_anno(tmp_path)
     result = SubsetResult(genetic_ids=["g"], n_matched=1)
-    summary = format_stdout_summary(
+    summary = format_run_summary(
         result,
         parse_time=0.1,
         eval_time=0.01,

@@ -25,6 +25,7 @@ from ..errors import (
     UsageError,
     ValidationError,
 )
+from .._cmd_helpers import parse_schema_override as _parse_schema_override
 from ..reporting import build_diff_result, format_diff_summary, write_diff_json
 from ..selector import compute_signature, load_selector
 from ..types import DiffFormat, Selector, SubsetResult
@@ -132,26 +133,3 @@ def run_diff(
     return EXIT_SUCCESS
 
 
-def _parse_schema_override(value: str | None):  # type: ignore[no-untyped-def]
-    """Map a CLI --schema-override CLASS letter to aadr_resolve.SchemaClass."""
-    if value is None:
-        return None
-    from aadr_resolve.types import SchemaClass
-
-    try:
-        return SchemaClass[value]
-    except KeyError as e:
-        raise UsageError(
-            errors=[
-                ValidationError(
-                    file="<cli>",
-                    line=1,
-                    col=1,
-                    pointer="/--schema-override",
-                    message=(
-                        f"unknown schema class '{value}'; expected one of "
-                        f"{[c.name for c in SchemaClass]}"
-                    ),
-                )
-            ],
-        ) from e

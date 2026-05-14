@@ -34,6 +34,8 @@ import os
 import sys
 import tempfile
 from dataclasses import asdict
+
+import pandas as pd
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -155,6 +157,7 @@ def write_select_output(
         )
     else:
         # OutputFormat is a closed enum; this branch is unreachable.
+        from .errors import InvariantViolation
         raise InvariantViolation(f"unknown output format: {fmt!r}")
 
 
@@ -306,6 +309,7 @@ def write_multi_anno_select_output(
     elif fmt == OutputFormat.JSON:
         _write_multi_anno_json(result, pairs, include_matched_criteria=include_matched_criteria, out_path=out_path)
     else:
+        from .errors import InvariantViolation
         raise InvariantViolation(f"unknown output format: {fmt!r}")
 
 
@@ -437,17 +441,11 @@ def _is_na(value: object) -> bool:
     Float64 dtypes plus plain None."""
     if value is None:
         return True
-    import pandas as pd
-
     try:
         return bool(pd.isna(value))  # type: ignore[call-overload]
     except (TypeError, ValueError):
         return False
 
-
-# Late import to avoid a cycle at module-load time; InvariantViolation
-# is used only inside write_select_output's "unknown format" fallback.
-from .errors import InvariantViolation  # noqa: E402
 
 __all__ = [
     "atomic_write",

@@ -28,9 +28,23 @@ from ..errors import (
     ValidationError,
 )
 from ..formats import write_multi_anno_select_output, write_select_output
-from ..reporting import format_stdout_summary
+from ..reporting import format_run_summary
 from ..selector import compute_signature, load_selector
 from ..types import OutputFormat, Selector
+
+
+# Known AADR release version ordering (ascending). Used to sort AnnoFrames
+# passed to multi-anno select so newer-version rows win dedup.
+# Unknown versions (not in this list) sort to the end (treated as newest).
+_AADR_VERSION_ORDER = ["v44.3", "v50.0", "v52.2", "v54.1", "v62.0", "v66.0"]
+
+
+def _version_sort_key(af: aadr_resolve.AnnoFrame) -> int:
+    """Ascending sort key for AnnoFrames by AADR version."""
+    try:
+        return _AADR_VERSION_ORDER.index(af.version)
+    except ValueError:
+        return len(_AADR_VERSION_ORDER)  # unknown versions sort last
 
 
 def run_select(
@@ -63,6 +77,21 @@ def run_select(
     """
     # Dispatch to multi-anno path when more than one .anno path is given.
     if len(anno_paths) > 1:
+        if source_anno is not None:
+            raise UsageError(
+                errors=[
+                    ValidationError(
+                        file="<cli>",
+                        line=1,
+                        col=1,
+                        pointer="/--source-anno",
+                        message=(
+                            "--source-anno is not supported with multi-anno select; "
+                            "pass a single .anno for cross-version IID lift."
+                        ),
+                    )
+                ],
+            )
         return _run_select_multi(
             selector_path=selector_path,
             anno_paths=anno_paths,
@@ -194,7 +223,7 @@ def run_select(
         coverage_column_used=effective_cov_col,
     )
 
-    # 6. Write output (TSV / JSON / IDs via formats.py dispatcher).
+    # 9. Write output (TSV / JSON / IDs via formats.py dispatcher).
     fmt_enum = OutputFormat(fmt)
     t_write_start = time.monotonic()
     write_select_output(
@@ -206,10 +235,10 @@ def run_select(
     )
     write_time = time.monotonic() - t_write_start
 
-    # 7. Stdout summary (to stderr; output goes to stdout when out is None).
+    # 10. Stdout summary (to stderr; output goes to stdout when out is None).
     if not quiet:
         sys.stderr.write(
-            format_stdout_summary(
+            format_run_summary(
                 result,
                 anno=anno,
                 parse_time=parse_time,
@@ -284,16 +313,6 @@ def _run_select_multi(
             raise IOFailure(f"cannot load .anno at {ap}: {e}") from e
         anno_frames.append(af)
 
-    # Sort by version (use the AADR version enum ordering as defined in the
-    # schema; fall back to lexicographic when the version isn't in the enum).
-    _AADR_VERSION_ORDER = ["v44.3", "v50.0", "v52.2", "v54.1", "v62.0", "v66.0"]
-
-    def _version_sort_key(af: aadr_resolve.AnnoFrame) -> int:
-        try:
-            return _AADR_VERSION_ORDER.index(af.version)
-        except ValueError:
-            return len(_AADR_VERSION_ORDER)  # unknown versions sort last
-
     anno_frames.sort(key=_version_sort_key)
     # Re-order anno_paths to match sorted anno_frames for accurate anno_files.
     sorted_anno_paths = [str(af.path) if af.path else "<in-memory>" for af in anno_frames]
@@ -355,7 +374,6 @@ def _run_select_multi(
     )
 
     effective_cov_col = selector.coverage_column or cli_coverage_column
-    from dataclasses import replace
     merged = replace(
         merged,
         anno_versions=sorted({af.version for af in anno_frames}),
@@ -382,7 +400,7 @@ def _run_select_multi(
     if not quiet:
         versions_str = ", ".join(merged.anno_versions)
         sys.stderr.write(
-            format_stdout_summary(
+            format_run_summary(
                 merged,
                 anno=anno_frames[-1],
                 parse_time=parse_time,

@@ -92,7 +92,7 @@ def resolve_cross_version_inputs(
         raise UsageError(
             errors=[
                 ValidationError(
-                    file=str(selector.resolve_to_version),
+                    file="<selector>",
                     line=1,
                     col=1,
                     pointer="/resolve_to_version",

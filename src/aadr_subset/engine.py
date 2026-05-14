@@ -1,17 +1,17 @@
 """Selector evaluation engine.
 
-Day 7 scope: full HLD v0.1 engine surface.
+Provides select_samples() — the core filter pipeline — and
+merge_multi_anno_results() for union-deduplication across multiple annos
+(v0.4+).
 
-- populations / individual_ids / individual_ids_source (Day 2)
-- modern_only / date.min_calbp / date.max_calbp / min_coverage (Day 3)
-- any: OR-block + exclude: NOT-of-OR block (Day 3)
-- cross-version (source_version + resolve_to_version + --source-anno +
-  --mid-bridge + --strict-resolve) — Day 6
-- coverage_column override via selector + CLI --coverage-column /
-  --coverage-derive (Day 7). Per-branch coverage_column wins inside
-  the branch.
-
-Feature gate is now empty.
+select_samples algorithm:
+  0. Cross-version IID lift (when resolve_to_version is set)
+  1. Top-level AND predicate mask
+  2. any: OR mask
+  3. exclude: NOT-of-OR mask
+  4. candidates_mask = top_and & any_or & exclude_keep
+  4b. Stratified sampling (v0.3+)
+  5-9. Materialize + dedup + accounting
 
 Per LLD §3.4 evaluation algorithm.
 """
@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import fnmatch
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import aadr_resolve
@@ -82,8 +83,6 @@ def select_samples(
         InvariantViolation: cross-lab MID collision detected by
             aadr-resolve, or AnnoFrame.path is None on cross-version.
     """
-    _reject_unsupported_features(selector)
-
     # Effective top-level coverage_column: selector wins over CLI.
     top_effective_cov_col = selector.coverage_column or coverage_column
 
@@ -546,18 +545,6 @@ def _compute_matched_criteria(
     return result
 
 
-# --- Feature gate (Day 3: shrinks; Day 6 will remove the last entries) ---
-
-
-def _reject_unsupported_features(selector: Selector) -> None:
-    """Feature gate. Empty as of Day 7 — full HLD v0.1 surface is wired.
-    Retained as a no-op insertion point for v0.2 grammar extensions.
-    """
-    # Reserved for v0.2+ feature gates. Intentionally a no-op.
-    _ = selector
-    return
-
-
 # --- Coverage column helper ---
 
 
@@ -938,8 +925,11 @@ def _resolve_cross_version(
     return target_iids, missing
 
 
-# Module-level per-AnnoFrame gid→iid cache. id(af) keys avoid leaking
-# references; AnnoFrame instances are short-lived (one per run).
+# Module-level per-AnnoFrame gid→iid cache. id(af) as key avoids holding
+# a reference to the AnnoFrame itself. In CLI use AnnoFrames are
+# short-lived so the cache stays small; in library API batch use callers
+# running many selects in one process will accumulate one entry per distinct
+# AnnoFrame — entries are never evicted within a process lifetime.
 _GID_TO_IID_CACHE: dict[int, dict[str, str]] = {}
 
 
@@ -1002,9 +992,15 @@ def merge_multi_anno_results(
         raise InvariantViolation("merge_multi_anno_results: pairs must be non-empty")
 
     if len(pairs) == 1:
-        # Trivial single-anno case: just tag the existing result.
+        # Trivial single-anno case: tag with multi-anno fields so callers
+        # always get a consistent SubsetResult regardless of pair count.
         af, result = pairs[0]
-        return result
+        return replace(
+            result,
+            anno_versions=[af.version],
+            anno_files=[str(af.path) if af.path else "<in-memory>"],
+            per_anno_genetic_ids={af.version: list(result.genetic_ids)},
+        )
 
     # Build the bridge-aware canonical-ID lookup tables (older → newer IIDs).
     # For each consecutive pair (af_old, af_new) we call resolve_master_ids
@@ -1082,19 +1078,20 @@ def merge_multi_anno_results(
     for af, _ in pairs:
         final_gids.extend(per_anno_surviving[af.version])
 
-    # Merge per_population_counts: sum across annos.
+    # Merge per_population_counts: recount from surviving GIDs only so that
+    # sum(merged_pop_counts.values()) == n_matched. Iterating oldest-first
+    # (pairs order) preserves population insertion order in the merged result.
     merged_pop_counts: dict[str, int] = {}
-    for _af, result in pairs:
-        for grp, cnt in result.per_population_counts.items():
-            # Only include populations that have surviving rows.
-            surviving_gids_set = set(per_anno_surviving[_af.version])
-            # Recount from scratch for accuracy: count surviving gids in this group.
-            # Cheaper approximation: include the count only if at least one
-            # surviving gid belongs to this group. Use the full count from the
-            # per-anno result since exact per-gid lookup isn't free; small
-            # over-count is acceptable here (matching the existing per_pop
-            # contract of "at least X survived from this group").
-            merged_pop_counts[grp] = merged_pop_counts.get(grp, 0) + cnt
+    for af, _ in pairs:
+        surviving = per_anno_surviving[af.version]
+        if not surviving:
+            continue
+        gid_to_grp: dict[str, object] = dict(
+            zip(af.genetic_id.tolist(), af.group_id.tolist(), strict=True)
+        )
+        for gid in surviving:
+            grp = gid_to_grp.get(gid, "")
+            merged_pop_counts[grp] = merged_pop_counts.get(grp, 0) + 1  # type: ignore[index]
 
     # Merge warnings: union of all lists.
     all_missing: list[str] = []

@@ -1,20 +1,13 @@
-"""Selector loader + JSON-schema validator + semantic-constraint checker
-+ RFC 8785 JCS signature.
+"""Selector loader, JSON-schema validator, semantic-constraint checker,
+and RFC 8785 JCS signature computation.
 
-Day 1 surface per LLD §3.3:
-- load_selector: top-level entry that takes a path/stream and returns
-  (SelectorMetadata, Selector), raising UsageError / IOFailure /
-  SoftValidationFailure on the appropriate failure modes.
-- validate_schema: jsonschema.Draft202012Validator.iter_errors() mapped to
-  ValidationError with file/line/col via ruamel.yaml AST walk.
-- check_semantic_constraints: validations the JSON schema can't express.
-- load_individual_ids_source: newline-delimited ID file per HLD format spec.
+Public surface:
+- load_selector: parse a YAML path/stream into (SelectorMetadata, Selector);
+  raises UsageError / IOFailure on failure.
+- compute_signature: RFC 8785 JCS SHA-256 over selector intent.
 - format_validation_errors: render list[ValidationError] for stderr.
 
-Day 5 added:
-- compute_signature: RFC 8785 JCS canonical-form SHA-256 over selector intent,
-  for the `selector_signature` field on SubsetResult (HLD §Reproducibility,
-  LLD §3.3).
+Per LLD §3.3.
 """
 
 from __future__ import annotations
@@ -838,7 +831,7 @@ def _locate_node(raw_text: str, path_parts: list[Any]) -> tuple[int, int]:
                 line, col = node.lc.key(part)
                 node = node[part]
                 # If this was the last part, return its key position.
-                if path_parts[-1] == part and part is path_parts[-1]:
+                if path_parts[-1] == part:
                     return (line + 1, col + 1)
             elif isinstance(part, int) and isinstance(node, list) and 0 <= part < len(node):
                 # ruamel sequence: lc.item(i) gives row of i-th element.

@@ -1,8 +1,5 @@
 """click entry point + subcommand routing.
 
-Day 1: `validate` subcommand wired end-to-end. `select` / `inspect` /
-`report` / `template` land on Day 3+ per HLD project plan.
-
 Top-level exception handler maps AadrSubsetError subclasses → exit codes
 per LLD §3.8 pin. standalone_mode=False prevents click from intercepting
 exceptions before our handler runs.
@@ -26,9 +23,7 @@ from .selector import format_validation_errors
 
 
 def _version_message() -> str:
-    """Build the --version output. aadr-resolve version reported when the
-    import succeeds (it will not on Day 1 since aadr-resolve isn't imported
-    by validate). Day 2+ will pull aadr_resolve.__version__ here."""
+    """Build the --version output, including the aadr-resolve version when available."""
     try:
         import aadr_resolve
 

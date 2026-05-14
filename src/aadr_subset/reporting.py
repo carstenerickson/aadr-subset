@@ -39,7 +39,7 @@ DIFF_SCHEMA_VERSION = 1
 COLUMNAR_POPULATION_THRESHOLD = 10
 
 
-def format_stdout_summary(
+def format_run_summary(
     result: SubsetResult,
     *,
     parse_time: float,
@@ -209,16 +209,17 @@ def format_inspect_summary(result: SubsetResult, anno: AnnoFrame) -> str:
     return "\n".join(lines).rstrip()
 
 
-def _short_signature(sig: str) -> str:
-    """Compact form for the selector signature header line.
+def _compact_sha256(sig: str) -> str:
+    """Return the 7+7 abbreviated form of a sha256: signature body."""
+    body = sig[len("sha256:"):]
+    return f"sha256:{body[:7]}...{body[-7:]}"
 
-    Full form: sha256:abcdef0123...0123456789abcdef
-    Short form: sha256:abcdef0...456789abcdef
-    """
+
+def _short_signature(sig: str) -> str:
+    """Compact `sha256:XXXXXXX...XXXXXXX` form for the selector header line."""
     if not sig.startswith("sha256:") or len(sig) < 20:
         return sig
-    body = sig[7:]
-    return f"sha256:{body[:7]}...{body[-7:]}"
+    return _compact_sha256(sig)
 
 
 # --- Report writers (per-population aggregates) ---
@@ -365,7 +366,6 @@ def _build_report_rows(
 
     # Map matched genetic_ids → row positions for the matched-row date/cov
     # aggregates.
-    matched_set = set(result.genetic_ids)
     gid_to_row = {g: i for i, g in enumerate(gid_col)}
 
     # Group → list of row indices in .anno; preserves first-appearance order.
@@ -414,10 +414,6 @@ def _build_report_rows(
                 cov_median = float(c_sub.median())
                 cov_min = float(c_sub.min())
                 cov_max = float(c_sub.max())
-
-        # Mark matched_set as used to avoid unused-var lint (it's
-        # intentionally available for future invariants).
-        _ = matched_set
 
         rows.append(
             {
@@ -615,14 +611,11 @@ def _fmt_delta(d: int) -> str:
 
 
 def _signature_tail(sig: str) -> str:
-    """Render a parenthesized short signature for header lines. Empty
-    when sig is empty (e.g. a SubsetResult that never went through
-    run_select)."""
+    """Parenthesized short signature for diff header lines. Empty when sig is empty."""
     if not sig:
         return ""
     if sig.startswith("sha256:") and len(sig) >= 20:
-        body = sig[len("sha256:") :]
-        return f" (sha256:{body[:7]}...{body[-7:]})"
+        return f" ({_compact_sha256(sig)})"
     return f" ({sig})"
 
 
@@ -632,7 +625,7 @@ __all__ = [
     "build_diff_result",
     "format_diff_summary",
     "format_inspect_summary",
-    "format_stdout_summary",
+    "format_run_summary",
     "write_diff_json",
     "write_report_json",
     "write_report_tsv",

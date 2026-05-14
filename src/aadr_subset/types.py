@@ -216,8 +216,9 @@ class SelectorWarnings:
 
 @dataclass(frozen=True, slots=True)
 class SubsetResult:
-    """Result of engine.select_samples(). Day 1 ships the type; engine.py
-    landing on Day 2-3 populates it."""
+    """Result of engine.select_samples() or engine.merge_multi_anno_results().
+    Frozen, slotted. Writers and reporters read it; they never mutate it.
+    Use dataclasses.replace() to produce a new instance with overrides."""
 
     genetic_ids: list[str]
     n_matched: int

@@ -3,9 +3,6 @@
 Per-population aggregate output. Same selector + AnnoFrame loading as
 `select`, then `reporting.write_report_tsv` / `write_report_json` instead
 of formats.py writers.
-
-Per LLD §3.13 / §4.5. Day 5 ships the single-version path; cross-version
-lands Day 6 alongside select's cross-version flow.
 """
 
 from __future__ import annotations
@@ -18,17 +15,18 @@ from pathlib import Path
 import aadr_resolve
 
 from ..engine import select_samples
+from .._cmd_helpers import (
+    normalize_coverage_flags as _normalize_coverage_flags,
+    parse_schema_override as _parse_schema_override,
+)
 from ..errors import (
     EXIT_SUCCESS,
     IOFailure,
     SoftValidationFailure,
-    UsageError,
-    ValidationError,
 )
 from ..reporting import write_report_json, write_report_tsv
 from ..selector import compute_signature, load_selector
 from ..types import ReportFormat
-from .select_cmd import _normalize_coverage_flags
 
 
 def run_report(
@@ -49,7 +47,7 @@ def run_report(
 ) -> int:
     """Orchestrate `aadr-subset report`. Returns exit code.
 
-    Day-5 sequence (§4.5 reduced for single-version):
+    Sequence:
     1. Load + validate selector.
     2. Load target AnnoFrame.
     3. Compute selector_signature.
@@ -157,26 +155,3 @@ def run_report(
     return EXIT_SUCCESS
 
 
-def _parse_schema_override(value: str | None):  # type: ignore[no-untyped-def]
-    """Map a CLI --schema-override CLASS letter to aadr_resolve.SchemaClass."""
-    if value is None:
-        return None
-    from aadr_resolve.types import SchemaClass
-
-    try:
-        return SchemaClass[value]
-    except KeyError as e:
-        raise UsageError(
-            errors=[
-                ValidationError(
-                    file="<cli>",
-                    line=1,
-                    col=1,
-                    pointer="/--schema-override",
-                    message=(
-                        f"unknown schema class '{value}'; expected one of "
-                        f"{[c.name for c in SchemaClass]}"
-                    ),
-                )
-            ],
-        ) from e
