@@ -337,3 +337,88 @@ def test_select_format_tsv_to_stdout(tmp_path: Path, v66_anno: Path) -> None:
     assert result.stdout.startswith("genetic_id\t")
     assert "Loschbour.AG\tLoschbour\tWestern_HG" in result.stdout
     assert "Matched 3 samples" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# ancestry-pipeline materialize_cohort pattern regression
+#
+# ancestry-pipeline/preprocess/aadr_subset_helper.py calls `select` twice
+# against the same synthesized populations-list selector:
+#   1. --format ids   → writes .ids file
+#   2. --format json  → writes JSON sidecar; reads selector_signature,
+#                       n_matched, anno_version, anno_file from it
+#
+# This test mirrors that exact two-call pattern and verifies all four
+# fields that the pipeline reads from the sidecar are present and correct.
+# ---------------------------------------------------------------------------
+
+
+def test_ancestry_pipeline_materialize_cohort_pattern(
+    tmp_path: Path, v66_anno: Path
+) -> None:
+    """Mirror ancestry-pipeline's materialize_cohort two-call pattern.
+
+    Step 1: select --format ids  → .ids file
+    Step 2: select --format json → JSON sidecar
+
+    Asserts the four sidecar fields that ancestry-pipeline reads:
+    selector_signature (sha256:...), n_matched, anno_version, anno_file.
+    Also asserts the signature is stable across two independent json calls
+    (deterministic hash contract).
+    """
+    import json as _json
+
+    # The selector shape ancestry-pipeline synthesises: a flat populations
+    # list with multiple group_ids (union of all pool members).
+    selector = tmp_path / "module_cohort.yaml"
+    selector.write_text(
+        "populations:\n  - Western_HG\n  - Eastern_HG\n",
+        encoding="utf-8",
+    )
+
+    # --- Step 1: ids call ---
+    out_ids = tmp_path / "module_cohort.ids"
+    r_ids = _run_cli("select", str(selector), str(v66_anno), "-o", str(out_ids))
+    assert r_ids.returncode == 0, r_ids.stderr
+
+    ids = out_ids.read_text(encoding="utf-8").strip().splitlines()
+    # Western_HG: Loschbour.AG, Loschbour.DG, Bichon  — Eastern_HG: KO1
+    assert set(ids) == {"Loschbour.AG", "Loschbour.DG", "Bichon", "KO1"}
+
+    # --- Step 2: json sidecar call (same selector, same anno) ---
+    out_json = tmp_path / "module_cohort.report.json"
+    r_json = _run_cli(
+        "select", str(selector), str(v66_anno), "--format", "json", "-o", str(out_json)
+    )
+    assert r_json.returncode == 0, r_json.stderr
+
+    sidecar = _json.loads(out_json.read_text(encoding="utf-8"))
+
+    # --- Fields that ancestry-pipeline reads from the sidecar ---
+    assert "selector_signature" in sidecar, "selector_signature missing from JSON sidecar"
+    assert sidecar["selector_signature"].startswith("sha256:"), (
+        f"selector_signature should be sha256:... ; got {sidecar['selector_signature']!r}"
+    )
+
+    assert sidecar["n_matched"] == 4, (
+        f"expected n_matched=4 (3 Western_HG + 1 Eastern_HG); got {sidecar['n_matched']}"
+    )
+
+    assert "anno_version" in sidecar, "anno_version missing from JSON sidecar"
+    assert isinstance(sidecar["anno_version"], str) and sidecar["anno_version"], (
+        f"anno_version must be a non-empty string; got {sidecar['anno_version']!r}"
+    )
+
+    assert "anno_file" in sidecar, "anno_file missing from JSON sidecar"
+    assert sidecar["anno_file"] != "", "anno_file must not be empty"
+
+    # --- Signature stability: a second json call must produce the same hash ---
+    out_json2 = tmp_path / "module_cohort.report2.json"
+    r_json2 = _run_cli(
+        "select", str(selector), str(v66_anno), "--format", "json", "-o", str(out_json2)
+    )
+    assert r_json2.returncode == 0, r_json2.stderr
+    sidecar2 = _json.loads(out_json2.read_text(encoding="utf-8"))
+    assert sidecar2["selector_signature"] == sidecar["selector_signature"], (
+        "selector_signature is not deterministic across repeated calls"
+    )
