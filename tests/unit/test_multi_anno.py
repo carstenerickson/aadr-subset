@@ -3,7 +3,7 @@
 Covers merge_multi_anno_results(), write_multi_anno_select_output(), and
 the CLI multi-anno dispatch via run_select(anno_paths=...).
 
-Seven test cases from the v0.4 plan:
+Seven original test cases from the v0.4 plan:
   1. Two-anno happy path — non-overlapping IDs → merged result has both sets.
   2. Exact-string dedup — same genetic_id in both → count=1, newer wins.
   3. Per-anno counts — per_anno_genetic_ids keys are correct.
@@ -11,6 +11,11 @@ Seven test cases from the v0.4 plan:
   5. Row ordering — oldest anno rows first; .anno order within each.
   6. Multi-anno JSON — anno_versions / per_anno_n_matched keys present.
   7. Single-anno regression — existing run_select path unchanged.
+
+Three regression tests for bugs fixed in review pass:
+  8. Single-pair merge must populate anno_versions/anno_files/per_anno_genetic_ids.
+  9. sum(per_population_counts.values()) must equal n_matched after dedup.
+  10. source_anno passed with multiple anno_paths must raise UsageError.
 """
 
 from __future__ import annotations
@@ -339,3 +344,110 @@ def test_single_anno_select_unchanged(tmp_path: Path, anno_a: aadr_resolve.AnnoF
     assert exit_code == 0
     ids = out.read_text(encoding="utf-8").strip().splitlines()
     assert set(ids) == {"IND_A1", "IND_A2"}
+
+
+# ---------------------------------------------------------------------------
+# Test 8: single-pair merge must populate multi-anno fields  [bug regression]
+# ---------------------------------------------------------------------------
+
+
+def test_merge_single_pair_populates_multi_anno_fields(
+    anno_a: aadr_resolve.AnnoFrame,
+) -> None:
+    """Single-pair merge must populate anno_versions/anno_files/per_anno_genetic_ids.
+
+    Before the fix, the early-return path in merge_multi_anno_results returned
+    the bare engine SubsetResult without filling in the three multi-anno fields,
+    leaving them at their empty-default values.
+    """
+    result_a = _select_all(anno_a)
+    merged = merge_multi_anno_results([(anno_a, result_a)])  # type: ignore[arg-type]
+
+    assert merged.anno_versions == [anno_a.version]
+    assert len(merged.anno_files) == 1
+    assert anno_a.version in merged.per_anno_genetic_ids
+    assert set(merged.per_anno_genetic_ids[anno_a.version]) == set(merged.genetic_ids)
+
+
+# ---------------------------------------------------------------------------
+# Test 9: per_population_counts sum == n_matched after dedup  [bug regression]
+# ---------------------------------------------------------------------------
+
+
+def test_merge_pop_counts_accurate_after_dedup(
+    anno_with_overlap_old: aadr_resolve.AnnoFrame,
+    anno_with_overlap_new: aadr_resolve.AnnoFrame,
+) -> None:
+    """sum(per_population_counts.values()) must equal n_matched after dedup.
+
+    Before the fix, per_population_counts was built by summing the raw
+    per-anno counts, which double-counted samples that appeared in both
+    annos and were deduplicated out.  With overlap fixtures the sum was 4
+    but n_matched was 3 (IND_SHARED deduplicated to the newer version).
+    """
+    result_old = _select_all(anno_with_overlap_old)
+    result_new = _select_all(anno_with_overlap_new)
+    pairs = [(anno_with_overlap_old, result_old), (anno_with_overlap_new, result_new)]
+
+    merged = merge_multi_anno_results(pairs)  # type: ignore[arg-type]
+
+    # IND_SHARED appears in both annos but is deduplicated to exactly one row.
+    assert merged.n_matched == 3, (
+        f"expected 3 merged samples (IND_SHARED deduped), got {merged.n_matched}"
+    )
+    total_from_counts = sum(merged.per_population_counts.values())
+    assert total_from_counts == merged.n_matched, (
+        f"per_population_counts sum {total_from_counts} != n_matched {merged.n_matched}; "
+        f"counts={merged.per_population_counts}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 10: source_anno + multi-anno paths must raise UsageError  [bug regression]
+# ---------------------------------------------------------------------------
+
+
+def test_run_select_multi_rejects_source_anno(
+    tmp_path: Path, anno_a: aadr_resolve.AnnoFrame
+) -> None:
+    """source_anno passed alongside multiple anno_paths must raise UsageError.
+
+    Before the fix, the multi-anno dispatch branch was reached before the
+    source_anno guard, so source_anno was silently dropped rather than
+    surfacing a hard error to the caller.
+    """
+    from aadr_subset.commands.select_cmd import run_select
+    from aadr_subset.errors import UsageError
+
+    second_anno = _make_anno(
+        tmp_path,
+        "anno_second_v66.0.anno",
+        [SynthRow(genetic_id="IND_X1", individual_id="X1", group_id="PopX", coverage=1.0)],
+    )
+    selector = tmp_path / "sel.yaml"
+    selector.write_text("populations: [PopA]\n", encoding="utf-8")
+
+    with pytest.raises(UsageError) as exc_info:
+        run_select(
+            selector_path=str(selector),
+            anno_paths=(str(anno_a.path), str(second_anno.path)),
+            out=None,
+            fmt="ids",
+            schema_override=None,
+            allow_empty=True,
+            allow_empty_source=False,
+            include_matched_criteria=False,
+            source_anno=str(tmp_path / "fake_source.anno"),
+            mid_bridge=None,
+            strict_resolve=False,
+            coverage_column=None,
+            coverage_derive=None,
+            max_per_population=None,
+            max_per_individual=None,
+            quiet=True,
+        )
+    # UsageError stores the message in the ValidationError payload, not in the
+    # base exception string.  Verify the flag name appears in at least one error.
+    assert any(
+        "--source-anno" in e.message for e in exc_info.value.errors
+    ), f"expected '--source-anno' in error messages; got {exc_info.value.errors}"
