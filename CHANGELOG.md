@@ -154,7 +154,7 @@ Per the design doc §10:
   workaround is to materialize each selector via `select` separately
   and diff the resulting ID lists.
 
-- **Group_ID glob patterns** (HLD: `populations:` literal matching now
+- **Group_ID glob patterns** — `populations:` literal matching now
   supports fnmatch-style `*`, `?`, `[abc]`). A literal containing any of
   `*`, `?`, `[` is treated as a pattern and expanded against the target
   `.anno`'s Group_ID set at engine evaluation; plain literals pass
@@ -284,7 +284,7 @@ release doesn't fail audits for older versions.
 - `compute_signature`: ~0.03 ms
 - End-to-end `select` CLI (incl. Python + click startup): ~600 ms
 
-### Engine surface (HLD v0.1 grammar complete)
+### Engine surface (v0.1 grammar complete)
 
 Top-level AND of: `populations`, `individual_ids` +
 `individual_ids_source`, `modern_only`, `date.{min,max}_calbp`,
@@ -422,7 +422,7 @@ no-arg form lists the bundled starting points, name-arg form emits
 the verbatim YAML (comments + metadata block preserved) to stdout or
 a file. Six starter templates ship under `aadr_subset/templates/`.
 
-- **`templates.py`** — discovery API per LLD §3.7:
+- **`templates.py`** — discovery API:
   - `list_templates()` returns sorted basenames (no `.yaml`). Discovery
     is by directory listing only; no manifest file, so adding a new
     template is a one-file PR.
@@ -457,7 +457,7 @@ a file. Six starter templates ship under `aadr_subset/templates/`.
 
 ### Added (Day 7 — --coverage-column / --coverage-derive flags)
 
-Closes out the last HLD v0.1 selector key. `min_coverage` filters now
+Closes out the last v0.1 selector key. `min_coverage` filters now
 route through `AnnoFrame.coverage_via(name)` when a `coverage_column:`
 override is supplied (either in the selector YAML or via CLI), making
 v62.0 (class D, no native coverage column) usable instead of silently
@@ -465,7 +465,7 @@ empty.
 
 - **`engine.select_samples` gains `coverage_column: str | None`**.
   Effective top-level value is `selector.coverage_column or
-  cli_coverage_column` (selector wins per HLD §Coverage handling).
+  cli_coverage_column` (selector wins).
   Each `any:` branch resolves to
   `branch.coverage_column or top_effective` so a branch can pin its
   own override while inheriting otherwise.
@@ -475,8 +475,8 @@ empty.
   sees a clean exit-2 message ("coverage column 'X' is not available
   in v66.0 (schema class E)") instead of an internal traceback.
 - **`commands/select_cmd._normalize_coverage_flags`** — merges
-  `--coverage-column` and `--coverage-derive` (HLD §Coverage handling
-  aliases). Both-set is `UsageError` (exit 4) rather than silent
+  `--coverage-column` and `--coverage-derive` (CLI aliases for the
+  same selector field). Both-set is `UsageError` (exit 4) rather than silent
   precedence.
 - **`run_select`** now:
   - threads `cli_coverage_column` into engine + signature compute.
@@ -491,7 +491,7 @@ empty.
   column.
 - **CLI**: `select` gains `--coverage-column NAME` and
   `--coverage-derive NAME` (aliases). `--help` documents both.
-- **Engine feature gate is now empty.** All HLD v0.1 selector grammar
+- **Engine feature gate is now empty.** All v0.1 selector grammar
   is wired. Day 7 closes the implementation phase; days 8-15 cover
   templates, polish, performance, and v0.1.0 release.
 
@@ -503,7 +503,7 @@ Individual_IDs are mapped to target Individual_IDs through
 `aadr_resolve.resolve_master_ids`, then the engine's predicate mask
 matches `af.individual_id.isin(target_iids)`. The target-IID set
 captures every row for each individual in target (multi-library /
-multi-data-type), per HLD test 16.
+multi-data-type).
 
 - **`engine.select_samples` gains three kwargs**: `source_anno`,
   `mid_bridge`, `strict_resolve`. When `selector.resolve_to_version`
@@ -527,7 +527,7 @@ multi-data-type), per HLD test 16.
   individual. Cache is keyed by `id(af)` and built lazily on first
   call.
 - **`commands/select_cmd._resolve_cross_version_inputs`** — validates
-  the four flag/selector combinations up front (LLD §4.1 step 4):
+  the four flag/selector combinations up front:
   no-op when neither side is set; `UsageError` on each of the three
   malformed combinations; verifies target `anno.version` matches
   `selector.resolve_to_version` and (when set) source `anno.version`
@@ -543,7 +543,7 @@ multi-data-type), per HLD test 16.
   a clear message when used without the other).
 - **Feature gate shrinks** to just `coverage_column:` (pending the
   `--coverage-column` / `--coverage-derive` CLI flags). Day 6 closes
-  out the last HLD-listed v0.1 engine feature.
+  out the last v0.1 engine feature.
 
 ### Added (Day 5 — selector signature + report subcommand)
 
@@ -554,14 +554,14 @@ emits per-group TSV / JSON aggregates with date + coverage stats.
 
 - **`selector.compute_signature(selector, *, cli_coverage_column)`** —
   SHA-256 over the RFC 8785 (JCS) canonical form of selector intent.
-  Returns `"sha256:" + hexdigest`. Canonicalization rules per LLD §3.3:
+  Returns `"sha256:" + hexdigest`. Canonicalization rules:
   YAML-inlined + file-loaded `individual_ids` unioned (sorted, deduped);
   `populations` and `exclude.{group_ids,individual_ids}` deduped and
   sorted; `individual_ids_source` path dropped (file *content* is the
   signature input, not the path); `any_branches` order preserved
   (they're indexed by `any[i]`); metadata block stripped; CLI
   `--coverage-column` injected only when the selector itself doesn't
-  set `coverage_column:` (selector wins per HLD §Coverage handling).
+  set `coverage_column:` (selector wins).
   Pure function — same selector + same coverage env produces the same
   hash regardless of YAML key ordering or list internal order.
 - **Wired into `run_select` + `run_inspect`** — both populate
@@ -610,7 +610,7 @@ breakdown without producing files. Stdout summary moved to a dedicated
   CSV writer uses `csv.QUOTE_NONE` since AADR Group_IDs / IIDs don't
   contain tab characters in practice.
 - **`formats.write_json`** — full `SubsetResult`-shape JSON with the
-  16-key insertion order pinned per LLD §3.5 (HLD §Output JSON).
+  16-key insertion order pinned for diff-friendliness.
   `matched_criteria` is **omitted entirely** when empty (the
   `--include-matched-criteria=False` default), reducing the key count
   to 15. `aadr_resolve_version` resolved at write time via
@@ -620,7 +620,7 @@ breakdown without producing files. Stdout summary moved to a dedicated
   new keys are non-breaking).
 - **`formats.write_select_output`** dispatcher routes by `OutputFormat`
   enum; `out_path=None` → stdout (no atomicity contract); `out_path`
-  set → `atomic_write` per LLD §3.5.
+  set → `atomic_write` (tempfile + fsync + rename, advisory `flock`).
 - **`reporting.format_stdout_summary`** — multi-line stderr summary
   shared by `select`. Inline form for <10 populations
   (`Per-population: A=187, B=34, ...`); columnar form ≥10. Timing
@@ -643,16 +643,16 @@ breakdown without producing files. Stdout summary moved to a dedicated
 
 ### Added (Day 3 — any:/exclude: combinators + date/modern_only/min_coverage)
 
-Selector evaluation algorithm wired end-to-end (HLD §Selector evaluation
-algorithm). Feature gate shrinks: `any:`, `exclude:`, `date:`,
+Selector evaluation algorithm wired end-to-end. Feature gate shrinks:
+`any:`, `exclude:`, `date:`,
 `modern_only:`, `min_coverage:` all now execute. Remaining gated:
 `coverage_column:` (pending --coverage-column CLI flag) and cross-version
 (`source_version:` + `resolve_to_version:`; Day 6).
 
 - **Top-level AND mask** now includes `date.min_calbp` / `date.max_calbp`,
-  `modern_only: true` (shorthand for `date_calbp <= 70`, per HLD §Modern
-  vs ancient detection), and `min_coverage:` (NaN coverage FAILS the
-  threshold per HLD §Coverage handling).
+  `modern_only: true` (shorthand for `date_calbp <= 70`, the AADR
+  convention for present-day vs ancient samples), and `min_coverage:`
+  (NaN coverage FAILS the threshold).
 - **`any:` OR-block** — list of branches; each branch is a full
   AND-predicate evaluated against the AnnoFrame; branch masks OR-
   combined. Branch-internal `individual_ids_source:` loading deferred
@@ -661,12 +661,12 @@ algorithm). Feature gate shrinks: `any:`, `exclude:`, `date:`,
 - **`exclude:` NOT-of-OR block** — per-condition OR over
   `exclude.group_ids` + `exclude.individual_ids`; final mask is
   top_and AND any_or AND NOT(exclude_or). `excluded_counts` populated
-  with one ExcludeCount per excluded literal (per HLD v4b list-of-
-  objects form).
+  with one ExcludeCount per excluded literal (list-of-objects form
+  in the JSON output).
 - **`per_branch_counts`** populated: `top_level` + `any[0]` /
   `any[1]` / ... keys, each counting that branch's CONTRIBUTION to
   the final result (intersection with top_and + exclude_keep), not
-  the branch's gross mask. Per HLD pin.
+  the branch's gross mask.
 - **v62 class-D coverage warning** wired in `commands/select_cmd.py`:
   when target `.anno` is class D (no native coverage column) AND
   selector contains `min_coverage:` (at top level or any: branch),
@@ -689,7 +689,7 @@ algorithm). Feature gate shrinks: `any:`, `exclude:`, `date:`,
 - New `make_v62_class_d_fixture` synthesizer for class-D `.anno`
   fixtures (4-sample Loschbour-style v62.0).
 
-HLD test coverage update:
+Test coverage update:
 - Test 1 (empty selector) — covered Day 2.
 - Test 2 (single-population) — covered Day 2.
 - Test 3 (flat AND) — covered Day 3.
@@ -732,8 +732,9 @@ Local CI: 95 tests pass, ruff + format + mypy clean, coverage 93%.
 - `engine.select_samples`: vectorized pandas filter pipeline over
   `populations` and `individual_ids` predicates. Multi-row IIDs
   (multi-library individuals like Loschbour with `.AG` + `.DG`)
-  naturally produce multiple GeneticID rows in the output, matching
-  HLD §within-version multi-row IIDs are normal.
+  naturally produce multiple GeneticID rows in the output (one
+  Individual_ID can map to multiple Genetic_IDs within a single AADR
+  version when the sample was sequenced as multiple libraries).
 - Feature gate in engine: Day-3+ selector features (`any:`, `exclude:`,
   `date:`, `modern_only:`, `min_coverage:`, `coverage_column:`,
   `resolve_to_version:`) produce `UsageError` with
@@ -757,11 +758,11 @@ Local CI: 95 tests pass, ruff + format + mypy clean, coverage 93%.
 - 31 new tests (74 total): engine unit tests with `FakeAnnoFrame`
   mock, atomic-write concurrency test, select-CLI integration tests
   via subprocess against the synthetic v66 fixture.
-- HLD test 1 (empty selector matches all) — covered.
-- HLD test 2 (single-population selector) — covered.
-- HLD test 3 (flat AND) — implicitly covered via populations + IIDs.
-- HLD test 16 (multi-GID per IID handling) — single-version variant
-  covered; cross-version variant Day 6.
+- Empty selector matches all — covered.
+- Single-population selector — covered.
+- Flat AND combination — implicitly covered via populations + IIDs.
+- Multi-GID per IID handling — single-version variant covered;
+  cross-version variant Day 6.
 
 ### Deferred to later days
 
@@ -776,9 +777,9 @@ Local CI: 95 tests pass, ruff + format + mypy clean, coverage 93%.
 
 - Project skeleton: `pyproject.toml`, README, LICENSE (MIT), `.gitignore`, `.python-version`.
 - Package layout under `src/aadr_subset/`: `__init__.py`, `__main__.py`, `py.typed`, `cli.py`, `types.py`, `errors.py`, `selector.py`, `schemas/selector.schema.json`, `commands/validate_cmd.py`.
-- `aadr-subset validate SELECTOR.yaml` subcommand end-to-end: loads selector via `ruamel.yaml` (line/col preserved), validates against the in-package Draft 2020-12 JSON Schema, runs semantic-constraint checks, accumulates all errors in one pass, exits 4 on any violation with `{file}:{line}:{col}: at {pointer}: {message}` per HLD §JSON-schema error message format.
+- `aadr-subset validate SELECTOR.yaml` subcommand end-to-end: loads selector via `ruamel.yaml` (line/col preserved), validates against the in-package Draft 2020-12 JSON Schema, runs semantic-constraint checks, accumulates all errors in one pass, exits 4 on any violation with `{file}:{line}:{col}: at {pointer}: {message}` formatting.
 - `aadr-subset --version` reports `aadr-subset {VERSION}` (and `aadr-resolve {VERSION}` once aadr-resolve is wired in on Day 2).
-- Selector grammar surface (per HLD §Selector grammar + LLD §2.3): `populations`, `individual_ids`, `individual_ids_source`, `source_version`, `resolve_to_version`, `modern_only`, `min_coverage`, `coverage_column`, `date`, `any`, `exclude`. Deprecated aliases `master_ids` / `master_ids_source` accepted with stderr WARNING + ValidationError captured for JSON capture (used by `select` Day 3+).
+- Selector grammar surface: `populations`, `individual_ids`, `individual_ids_source`, `source_version`, `resolve_to_version`, `modern_only`, `min_coverage`, `coverage_column`, `date`, `any`, `exclude`. Deprecated aliases `master_ids` / `master_ids_source` accepted with stderr WARNING + ValidationError captured for JSON capture (used by `select` Day 3+).
 - Exception hierarchy in `errors.py`: `AadrSubsetError` base + `SoftValidationFailure` / `IOFailure` / `InvariantViolation` / `UsageError` mapping to exits 1/2/3/4. `ValidationError` value-type for accumulated error reporting.
 - GitHub Actions CI workflow: matrix Python 3.11/3.12/3.13 × Ubuntu/macOS. ruff lint + format-check + mypy strict + pytest with coverage gate (90% on src/aadr_subset/ excluding cli.py and __main__.py).
 
