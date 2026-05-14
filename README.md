@@ -82,7 +82,7 @@ broken.yaml:7:5: at /populations/2: 42 is not of type 'string'
 broken.yaml:12:3: at /any/0/min_coverage: -0.5 is less than the minimum of 0
 ```
 
-### `select SELECTOR.yaml ANNO.anno [-o PATH] [--format ids|tsv|json]`
+### `select SELECTOR.yaml ANNO.anno [ANNO2.anno …] [-o PATH] [--format ids|tsv|json]`
 
 The main case: materialize a selector against a target `.anno` and
 write matched sample IDs / TSV / JSON.
@@ -102,6 +102,23 @@ selector YAML — selector wins per-field):
 aadr-subset select europe_neolithic.yaml v66.HO.aadr.PUB.anno \
     --max-per-individual 1 --max-per-population 50 -o cohort.ids
 ```
+
+**Multi-anno select (v0.4+)**: pass more than one `.anno` to merge
+cohorts across releases in a single command. The selector is evaluated
+against each `.anno` independently; results are union-deduplicated on
+`genetic_id` (newer-version rows win on collision):
+
+```bash
+aadr-subset select britain_iron_age.yaml v44.3_HO.anno v66.HO.aadr.PUB.anno \
+    -o cohort.ids
+```
+
+TSV output gains a `source_version` column identifying which `.anno`
+each row came from. JSON output gains `anno_versions`, `anno_files`, and
+`per_anno_n_matched` keys alongside the single-anno fields for
+backwards compatibility. `resolve_to_version:` selectors are
+incompatible with multi-anno mode (hard error — use single-anno +
+`--source-anno` for cross-version IID lifting instead).
 
 Cross-version flow (selector defined against an older release than the
 materialized one):
@@ -294,8 +311,9 @@ Group_IDs. Patterns work in `populations:`, `exclude.group_ids:`, and
 any-branch `populations:`. The selector signature hashes the **pattern**,
 not the resolved set — so the same selector against v62 vs v66 produces
 the same signature even when the pattern resolves to different concrete
-labels. A pattern that matches zero Group_IDs surfaces as a stderr
-warning (likely typo).
+labels. A pattern that matches zero Group_IDs surfaces as a warning
+(CLI: stderr; library API: `logging.getLogger("aadr_subset")`) — likely
+a typo.
 
 **Stratified sampling (v0.3+)**: `sampling.max_per_population` /
 `max_per_individual` cap the cohort within each Group_ID / Individual_ID.
@@ -315,6 +333,62 @@ Schema](src/aadr_subset/schemas/selector.schema.json); for grammar
 semantics and edge cases (NaN handling, branch independence, signature
 canonicalization) see the inline schema `description:` fields and the
 [CHANGELOG](CHANGELOG.md).
+
+## Library API (v0.4+)
+
+`aadr-subset` exposes a Python API for programmatic use — no subprocess
+required:
+
+```python
+from aadr_subset import select, SubsetResult
+
+result: SubsetResult = select("britain_iron_age.yaml", "v66.HO.aadr.PUB.anno")
+print(result.genetic_ids)      # list[str] of matched sample IDs
+print(result.n_matched)        # int
+print(result.anno_version)     # e.g. "v66.0"
+print(result.selector_signature)  # "sha256:..."
+```
+
+Full signature:
+
+```python
+from pathlib import Path
+from aadr_subset import select, load_selector
+import aadr_resolve
+
+result = select(
+    selector,             # str | Path | Selector — YAML path or pre-loaded object
+    anno,                 # str | Path | AnnoFrame — .anno path or pre-loaded object
+    *,
+    allow_empty=True,     # True by default (differs from CLI default of False)
+    allow_empty_source=False,
+    include_matched_criteria=False,
+    source_anno=None,     # str | Path | AnnoFrame — cross-version source
+    mid_bridge=None,      # str | Path — MID-rename bridge for multi-anno dedup
+    strict_resolve=False,
+    coverage_column=None, # str — override coverage column
+    coverage_derive=None, # str — derive proxy for class-D inputs
+    max_per_population=None,   # int
+    max_per_individual=None,   # int
+    schema_override=None,      # str — force schema class detection
+    quiet=False,
+)
+```
+
+Key differences from the CLI:
+
+- **`allow_empty=True`** by default — the API doesn't abort on
+  zero matches; callers check `result.n_matched` themselves.
+- **Warnings via `logging`** — the `"aadr_subset"` logger emits
+  warnings (zero-match globs, v62 coverage proxy) instead of writing
+  to stderr. Configure with `logging.getLogger("aadr_subset")`.
+- **Pre-loaded objects accepted** — pass a `Selector` or `AnnoFrame`
+  directly to skip repeated file I/O in loops.
+
+Public symbols exported from `aadr_subset`:
+`select`, `load_selector`, `SubsetResult`, `Selector`, `SelectorMetadata`,
+`SamplingSpec`, `AadrSubsetError`, `IOFailure`, `InvariantViolation`,
+`SoftValidationFailure`, `UsageError`, `ValidationError`.
 
 ## Composing with `plink2`
 

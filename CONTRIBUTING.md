@@ -41,6 +41,8 @@ src/aadr_subset/
   __main__.py     # `python -m aadr_subset` entry-point
   cli.py          # click entry-point; wires flags → command modules
   commands/       # one module per subcommand (select, inspect, report, diff, …)
+  api.py          # library API entry point — select() for programmatic use (v0.4+)
+  _cmd_helpers.py # shared validation helpers used by commands/ and api.py (v0.4+)
   engine.py       # core selection + sampling algorithm
   selector.py     # YAML → Selector dataclass + signature computation
   types.py        # shared dataclasses (Selector, SubsetResult, SamplingSpec, …)

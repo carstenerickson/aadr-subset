@@ -71,11 +71,13 @@ Three things to internalize:
 | `errors.py` | Exception hierarchy + `EXIT_*` constants + `ValidationError`. | ~100 |
 | `schemas/selector.schema.json` | JSON Schema for selector YAML; source of truth for the grammar surface. | — |
 | `selector.py` | YAML → `Selector`. Loader, schema validator, semantic-constraint checker, IID-source-file loader, **signature computation**, error formatter. | ~850 |
-| `engine.py` | `select_samples(anno, selector, …) → SubsetResult`. The filter pipeline (predicate masks → exclude → sampling → dedup → accounting). Owns the cross-version lift and the glob expansion. | ~960 |
-| `formats.py` | `write_select_output` dispatch + `write_ids` / `write_tsv` / `write_json`. Owns `atomic_write` (tempfile + fsync + rename, advisory `flock`). | ~310 |
+| `engine.py` | `select_samples(anno, selector, …) → SubsetResult` + `merge_multi_anno_results`. The filter pipeline (predicate masks → exclude → sampling → dedup → accounting). Owns the cross-version lift, glob expansion, and multi-anno dedup logic. | ~960 |
+| `formats.py` | `write_select_output` / `write_multi_anno_select_output` dispatch + `write_ids` / `write_tsv` / `write_json`. Owns `atomic_write` (tempfile + fsync + rename, advisory `flock`). | ~310 |
 | `reporting.py` | `format_stdout_summary`, `format_inspect_summary`, `format_diff_summary`, `write_report_*`, `build_diff_result`. Everything human-readable. | ~635 |
 | `templates.py` | Loader/lister for the bundled `templates/*.yaml`. Distinct from the directory. | ~80 |
 | `templates/` | Shipped starter selectors (two-doc YAML: metadata header + body). | — |
+| `api.py` | Public library API — `select(selector, anno, …) → SubsetResult`. Accepts str/Path/pre-loaded objects; `allow_empty=True` default; warnings via `logging.getLogger("aadr_subset")`. (v0.4+) | ~200 |
+| `_cmd_helpers.py` | Shared validation helpers extracted from `select_cmd.py` so both `commands/` and `api.py` use the same logic: `normalize_coverage_flags`, `resolve_cross_version_inputs`, `parse_schema_override`. (v0.4+) | ~100 |
 | `cli.py` | `click` group + per-subcommand entry points. Wires flags → `commands/run_*`; top-level `AadrSubsetError` handler maps exceptions → exit codes. | ~520 |
 | `commands/{validate,select,inspect,report,diff,template}_cmd.py` | One orchestrator per subcommand. Each `run_*` takes flat kwargs and returns an int exit code. | ~40-390 each |
 
@@ -86,14 +88,20 @@ plus `aadr_resolve` (the latter only inside `write_json` to record
 the running version); `reporting.py` depends on them plus
 `formats.atomic_write` (no runtime `aadr_resolve` dep — `AnnoFrame`
 is `TYPE_CHECKING`-only); `templates.py` depends on `selector` and
-`errors`; `commands/*` depend on everything below and are imported
-only by `cli.py` (which itself also imports `selector` for
-`format_validation_errors`).
+`errors`; `_cmd_helpers.py` depends on `types`, `errors`, and
+`aadr_resolve`; `commands/*` depend on everything below (including
+`_cmd_helpers`) and are imported only by `cli.py` (which itself also
+imports `selector` for `format_validation_errors`); `api.py` sits
+beside `cli.py` as a parallel entry point, depending on
+`_cmd_helpers`, `engine`, `selector`, `formats`, `types`, `errors`,
+and `aadr_resolve`.
 
 ```mermaid
 graph TD
   cli[cli.py]
   commands["commands/*_cmd.py"]
+  api[api.py]
+  _cmd_helpers[_cmd_helpers.py]
   formats[formats.py]
   reporting[reporting.py]
   templates[templates.py]
@@ -115,6 +123,19 @@ graph TD
   commands --> templates
   commands --> types
   commands --> errors
+  commands --> _cmd_helpers
+
+  api --> _cmd_helpers
+  api --> engine
+  api --> selector
+  api --> formats
+  api --> types
+  api --> errors
+  api --> aadr_resolve
+
+  _cmd_helpers --> types
+  _cmd_helpers --> errors
+  _cmd_helpers --> aadr_resolve
 
   selector --> types
   selector --> errors
@@ -275,6 +296,12 @@ read it; they never mutate it. Where a caller needs to "add a field"
 field=value, …)` — the stdlib pattern for constructing a new frozen
 dataclass from an existing one with overrides.
 
+Single-anno fields (`anno_version`, `anno_file`) are always set. The
+three multi-anno fields added in v0.4 (`anno_versions: list[str]`,
+`anno_files: list[str]`, `per_anno_genetic_ids: dict[str, list[str]]`)
+default to empty and are only populated by `merge_multi_anno_results`.
+Single-anno paths leave them empty for backwards compatibility.
+
 ### `AnnoFrame` (aadr_resolve)
 
 Not ours — an external PyPI dependency from `aadr-resolve`, treated as
@@ -283,7 +310,7 @@ a black-box dataframe wrapper. Test code stands in with `FakeAnnoFrame`
 
 ## The selector signature contract
 
-`selector.compute_signature(selector, *, cli_coverage_column, cli_max_per_population, cli_max_per_individual)`
+`selector.compute_signature(selector, *, cli_coverage_column, cli_max_per_population, cli_max_per_individual, anno_versions=None)`
 is the **public contract** that defines reproducibility. It produces
 `"sha256:" + hashlib.sha256(rfc8785.dumps(payload)).hexdigest()` where
 the `payload` dict is built per these rules:
@@ -305,6 +332,10 @@ the `payload` dict is built per these rules:
   produces the same hash against v62 vs v66 even when the resolved
   Group_IDs differ. Sampling caps follow the same intent-not-expansion
   rule.
+- `anno_versions` (v0.4+, optional) — when passed as a non-None
+  `list[str]`, the sorted list is injected into the payload as
+  `"anno_versions"`. Passing `None` (the default) leaves single-anno
+  hashes unchanged — no retroactive signature breakage.
 
 **Any change that would alter the canonical form for existing selectors
 is a breaking change** and needs a major version bump discussion. Pure
@@ -520,9 +551,12 @@ A few things you might look for and not find:
   at the surrounding code + the CHANGELOG entry for the version that
   introduced the feature — those together are the design.
 
-- **A logging framework**: stderr writes for warnings, stdout for
-  output. The tool is short-lived and shell-composable; structured
-  logging is out of scope.
+- **A logging framework in the CLI**: the CLI tool writes warnings to
+  stderr and output to stdout. The tool is short-lived and
+  shell-composable; structured logging is out of scope there. The
+  **library API** (`api.py`) is different — it emits warnings via
+  `logging.getLogger("aadr_subset")` so callers can route them with
+  standard Python logging instead of having the library pollute stderr.
 
 - **A config file / environment overrides**: by design. Everything is
   selector-YAML + CLI flags; the tool produces deterministic output
