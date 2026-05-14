@@ -229,12 +229,23 @@ class SubsetResult:
     warnings: SelectorWarnings = field(default_factory=SelectorWarnings)
     selector_signature: str = ""
 
-    # Run-environment metadata (populated by run_select before return)
+    # Run-environment metadata (populated by run_select / api.select before return)
     anno_file: str = ""
     anno_version: str = ""
     schema_class: str = ""
     selector_file: str = ""
     coverage_column_used: str | None = None
+
+    # Multi-anno fields (v0.4+). Empty for single-anno — backwards-compatible
+    # with all existing replace() call sites that don't set these fields.
+    # anno_versions: sorted list of all targeted AADR versions.
+    # anno_files: parallel list of source .anno file paths.
+    # per_anno_genetic_ids: version → surviving genetic_ids for that anno after
+    #     cross-version dedup (older-version rows superseded by a newer version
+    #     of the same individual are not included).
+    anno_versions: list[str] = field(default_factory=list)
+    anno_files: list[str] = field(default_factory=list)
+    per_anno_genetic_ids: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

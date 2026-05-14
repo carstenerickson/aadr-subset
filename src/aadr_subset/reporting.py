@@ -48,6 +48,7 @@ def format_stdout_summary(
     out_path_str: str | None,
     selector_file: str,
     anno: AnnoFrame,
+    multi_anno_versions: str | None = None,
 ) -> str:
     """Multi-line summary per HLD §Stdout summary.
 
@@ -71,7 +72,10 @@ def format_stdout_summary(
         f" ({_short_signature(result.selector_signature)})" if result.selector_signature else ""
     )
     lines.append(f"Selector: {selector_file}{sig_tail}")
-    lines.append(f".anno:    {anno.path} ({anno.version}, class {anno.schema_class.value})")
+    if multi_anno_versions:
+        lines.append(f".anno:    {anno.path} (versions: {multi_anno_versions})")
+    else:
+        lines.append(f".anno:    {anno.path} ({anno.version}, class {anno.schema_class.value})")
     lines.append("")
     pop_word = "population" if pop_count == 1 else "populations"
     lines.append(f"Matched {result.n_matched} samples across {pop_count} {pop_word}.")

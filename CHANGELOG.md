@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-05-13
+
+### Added
+
+- **Library API** (`from aadr_subset import select`) — call the selector
+  engine from Python without shelling out. `select(selector, anno, **kwargs)`
+  returns a `SubsetResult` directly; output writing is the caller's
+  responsibility. Warnings surface via `logging.warning("aadr_subset")`
+  instead of `sys.stderr`. Accepts pre-loaded `Selector` and `AnnoFrame`
+  objects to amortise load cost when batching many selects. All public error
+  types (`AadrSubsetError`, `IOFailure`, `SoftValidationFailure`, `UsageError`,
+  `ValidationError`) are now re-exported from the package root.
+
+- **Multi-target `select`** — pass two or more `.anno` paths to
+  `aadr-subset select`; results are union-deduplicated by `genetic_id`
+  across versions (exact-string dedup, or bridge-aware with `--mid-bridge`).
+  Newer-version rows win when the same individual appears in multiple annos.
+  TSV output gains a `source_version` column; JSON output gains `anno_versions`,
+  `anno_files`, and `per_anno_n_matched` additive keys. Selector signature
+  includes the sorted version set so the same selector run against different
+  version combinations produces distinct hashes. Incompatible with
+  `resolve_to_version:` / `--source-anno` (hard error).
+
 ### Fixed
 
 - `select` stdout summary now pluralizes "population" correctly:
@@ -31,6 +54,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1240k-target ratio.
 - README: added an explicit "source vs target .anno" note next to the
   cross-version `--source-anno` example.
+- `DEVELOPMENT.md`: new file — architecture overview, module dependency
+  graph (with three Mermaid diagrams), execution pipeline walkthrough,
+  test infrastructure guide, and release process.
+- `CONTRIBUTING.md`: new file — dev setup, lint/test/typecheck commands,
+  PR guidelines, and a pointer to `DEVELOPMENT.md`.
 
 ## [0.3.0] — 2026-05-12
 

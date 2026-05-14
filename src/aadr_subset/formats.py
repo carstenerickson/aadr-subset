@@ -281,6 +281,157 @@ def write_json(
     atomic_write(out_path, body)
 
 
+def write_multi_anno_select_output(
+    result: SubsetResult,
+    pairs: list[tuple[AnnoFrame, SubsetResult]],
+    *,
+    fmt: OutputFormat,
+    out_path: Path | None,
+    include_matched_criteria: bool,
+) -> None:
+    """Dispatch multi-anno output to the appropriate writer.
+
+    IDS: identical to single-anno (write result.genetic_ids).
+    TSV: same fixed columns as write_tsv plus source_version before
+         matched_criteria; rows grouped by anno (oldest first).
+    JSON: same shape as write_json plus anno_versions / anno_files /
+         per_anno_n_matched additive keys.
+
+    out_path=None writes to stdout; set uses atomic_write.
+    """
+    if fmt == OutputFormat.IDS:
+        write_ids(result.genetic_ids, out_path)
+    elif fmt == OutputFormat.TSV:
+        _write_multi_anno_tsv(result, pairs, out_path)
+    elif fmt == OutputFormat.JSON:
+        _write_multi_anno_json(result, pairs, include_matched_criteria=include_matched_criteria, out_path=out_path)
+    else:
+        raise InvariantViolation(f"unknown output format: {fmt!r}")
+
+
+def _write_multi_anno_tsv(
+    result: SubsetResult,
+    pairs: list[tuple[AnnoFrame, SubsetResult]],
+    out_path: Path | None,
+) -> None:
+    """TSV with source_version column.
+
+    Columns: genetic_id, individual_id, group_id, date_calbp, coverage,
+             source_version, matched_criteria.
+
+    Row ordering: per anno in pairs order (oldest first); within each anno
+    rows follow the order in result.per_anno_genetic_ids[af.version].
+    """
+    buf = io.StringIO()
+    writer = csv.writer(
+        buf,
+        delimiter="\t",
+        quoting=csv.QUOTE_NONE,
+        escapechar="\\",
+        lineterminator="\n",
+    )
+    writer.writerow(
+        [
+            "genetic_id",
+            "individual_id",
+            "group_id",
+            "date_calbp",
+            "coverage",
+            "source_version",
+            "matched_criteria",
+        ]
+    )
+
+    for af, _per_result in pairs:
+        surviving_gids = result.per_anno_genetic_ids.get(af.version, [])
+        if not surviving_gids:
+            continue
+
+        # Build a row-index lookup for this anno's surviving gids.
+        gid_to_row: dict[str, int] = {
+            gid: idx for idx, gid in enumerate(af.genetic_id.tolist())
+        }
+        iid_col = af.individual_id.tolist()
+        grp_col = af.group_id.tolist()
+        date_col = af.date_calbp
+        cov_col = af.coverage
+
+        for gid in surviving_gids:
+            i = gid_to_row[gid]
+            date_val = date_col.iloc[i]
+            date_cell = "" if _is_na(date_val) else str(int(date_val))
+            cov_val = cov_col.iloc[i]
+            cov_cell = "" if _is_na(cov_val) else f"{float(cov_val):g}"
+            criteria = result.matched_criteria.get(gid, [])
+            criteria_cell = ";".join(criteria)
+            writer.writerow(
+                [gid, iid_col[i], grp_col[i], date_cell, cov_cell, af.version, criteria_cell]
+            )
+
+    content = buf.getvalue()
+    if out_path is None:
+        sys.stdout.write(content)
+        sys.stdout.flush()
+        return
+    atomic_write(out_path, content)
+
+
+def _write_multi_anno_json(
+    result: SubsetResult,
+    pairs: list[tuple[AnnoFrame, SubsetResult]],
+    *,
+    include_matched_criteria: bool,
+    out_path: Path | None,
+) -> None:
+    """JSON output for multi-anno results.
+
+    Additive keys beyond the single-anno shape (no JSON_SCHEMA_VERSION bump):
+      anno_versions, anno_files, per_anno_n_matched.
+    anno_version / anno_file retain the newest-version values for backwards
+    compat with consumers that read only those fields.
+    """
+    try:
+        import aadr_resolve
+
+        aadr_resolve_version = getattr(aadr_resolve, "__version__", "unknown")
+    except ImportError:
+        aadr_resolve_version = "not-installed"
+
+    out: dict[str, object] = {}
+    out["genetic_ids"] = list(result.genetic_ids)
+    out["n_matched"] = result.n_matched
+    out["per_population_counts"] = dict(result.per_population_counts)
+    out["per_branch_counts"] = dict(result.per_branch_counts)
+    out["excluded_counts"] = [asdict(ec) for ec in result.excluded_counts]
+    out["sampling_drops"] = [asdict(sd) for sd in result.sampling_drops]
+
+    if include_matched_criteria and result.matched_criteria:
+        out["matched_criteria"] = {gid: list(crit) for gid, crit in result.matched_criteria.items()}
+
+    out["warnings"] = asdict(result.warnings)
+    out["selector_signature"] = result.selector_signature
+    out["selector_file"] = result.selector_file
+    out["anno_file"] = result.anno_file        # newest version (backwards compat)
+    out["anno_version"] = result.anno_version  # newest version (backwards compat)
+    out["anno_versions"] = list(result.anno_versions)
+    out["anno_files"] = list(result.anno_files)
+    out["per_anno_n_matched"] = {
+        v: len(gids) for v, gids in result.per_anno_genetic_ids.items()
+    }
+    out["schema_class"] = result.schema_class
+    out["coverage_column"] = result.coverage_column_used
+    out["aadr_subset_version"] = __version__
+    out["aadr_resolve_version"] = aadr_resolve_version
+    out["schema_version"] = JSON_SCHEMA_VERSION
+
+    body = json.dumps(out, indent=2, ensure_ascii=False, sort_keys=False) + "\n"
+    if out_path is None:
+        sys.stdout.write(body)
+        sys.stdout.flush()
+        return
+    atomic_write(out_path, body)
+
+
 def _is_na(value: object) -> bool:
     """True for pandas NA / NaN / None. Handles both Int64-nullable and
     Float64 dtypes plus plain None."""
@@ -302,6 +453,7 @@ __all__ = [
     "atomic_write",
     "write_ids",
     "write_json",
+    "write_multi_anno_select_output",
     "write_select_output",
     "write_tsv",
 ]

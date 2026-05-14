@@ -67,7 +67,7 @@ def validate_command(ctx: click.Context, selector_path: str) -> None:
 
 @cli.command("select")
 @click.argument("selector_path", type=click.STRING)
-@click.argument("anno_path", type=click.Path(exists=True, dir_okay=False))
+@click.argument("anno_paths", type=click.Path(exists=True, dir_okay=False), nargs=-1, required=True)
 @click.option(
     "-o",
     "--out",
@@ -168,7 +168,7 @@ def validate_command(ctx: click.Context, selector_path: str) -> None:
 def select_command(
     ctx: click.Context,
     selector_path: str,
-    anno_path: str,
+    anno_paths: tuple[str, ...],
     out: str | None,
     fmt: str,
     schema_override: str | None,
@@ -183,16 +183,19 @@ def select_command(
     max_per_population: int | None,
     max_per_individual: int | None,
 ) -> None:
-    """Materialize a selector against a target AADR .anno; emit sample IDs / TSV / JSON.
+    """Materialize a selector against one or more AADR .anno files; emit sample IDs / TSV / JSON.
 
-    Full HLD select surface: populations + individual_ids + date +
-    modern_only + min_coverage + any:/exclude: combinators against a
-    single .anno; ids / tsv / json output; cross-version IID lift via
-    --source-anno + selector.resolve_to_version.
+    Single-anno: populations + individual_ids + date + modern_only +
+    min_coverage + any:/exclude: combinators; ids / tsv / json output;
+    cross-version IID lift via --source-anno + selector.resolve_to_version.
+
+    Multi-anno (v0.4+): pass two or more .anno paths to union-deduplicate
+    results across AADR versions. TSV output gains a source_version column.
+    Incompatible with --source-anno / resolve_to_version (hard error).
     """
     exit_code = run_select(
         selector_path=selector_path,
-        anno_path=anno_path,
+        anno_paths=anno_paths,
         out=out,
         fmt=fmt,
         schema_override=schema_override,

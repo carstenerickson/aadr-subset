@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aadr-subset"
-version = "0.3.0"
+version = "0.4.0"
 description = "Declarative AADR panel subsetting from YAML selectors; the missing first-class tool for cohort definitions in ancient-DNA / population-genetics workflows."
 readme = "README.md"
 license = { text = "MIT" }

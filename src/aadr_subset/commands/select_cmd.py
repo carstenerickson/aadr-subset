@@ -1,13 +1,8 @@
 """select subcommand orchestrator.
 
-Day 6: full HLD select surface end-to-end —
-- Single-version selectors (Day 2 surface)
-- ids / tsv / json output (Day 4)
-- Selector signature (Day 5)
-- Cross-version IID lift via --source-anno + selector.resolve_to_version
-  + optional --mid-bridge + --strict-resolve
-
-Per LLD §3.9 / §4.1.
+Handles single-version and cross-version (resolve_to_version) selectors.
+ids / tsv / json output, selector signature, glob expansion, sampling.
+Multi-anno support (v0.4+) lives in the multi-anno branch of run_select.
 """
 
 from __future__ import annotations
@@ -19,7 +14,12 @@ from pathlib import Path
 
 import aadr_resolve
 
-from ..engine import select_samples
+from .._cmd_helpers import (
+    normalize_coverage_flags as _normalize_coverage_flags,
+    parse_schema_override as _parse_schema_override,
+    resolve_cross_version_inputs as _resolve_cross_version_inputs,
+)
+from ..engine import merge_multi_anno_results, select_samples
 from ..errors import (
     EXIT_SUCCESS,
     IOFailure,
@@ -27,7 +27,7 @@ from ..errors import (
     UsageError,
     ValidationError,
 )
-from ..formats import write_select_output
+from ..formats import write_multi_anno_select_output, write_select_output
 from ..reporting import format_stdout_summary
 from ..selector import compute_signature, load_selector
 from ..types import OutputFormat, Selector
@@ -36,7 +36,7 @@ from ..types import OutputFormat, Selector
 def run_select(
     *,
     selector_path: str,
-    anno_path: str,
+    anno_paths: tuple[str, ...],
     out: str | None,
     fmt: str,
     schema_override: str | None,
@@ -52,23 +52,39 @@ def run_select(
     max_per_individual: int | None = None,
     quiet: bool = False,
 ) -> int:
-    """Orchestrate `aadr-subset select`. Returns exit code per HLD §Exit codes.
+    """Orchestrate `aadr-subset select`. Returns exit code.
 
-     Day-6 sequence (§4.1):
-     1. Load + validate selector.
-     2. Load target AnnoFrame from anno_path.
-     3. Cross-version flag check + (optional) source AnnoFrame load.
-     4. v62 class-D coverage warning if applicable.
-     5. engine.select_samples (timed).
-     6. Exit-1 gate: n_matched == 0 and not allow_empty → SoftValidationFailure.
-     7. Compute selector signature.
-     8. Populate run-env metadata.
-     9. Write output via write_select_output (timed).
-    10. Stdout summary unless quiet.
-    11. Return EXIT_SUCCESS.
+    Single-anno path (len(anno_paths)==1): existing pipeline — load selector,
+    load anno, optional cross-version lift, engine evaluation, write output.
+
+    Multi-anno path (len(anno_paths)>1, v0.4+): run select_samples per anno,
+    merge via merge_multi_anno_results, write via write_multi_anno_select_output.
+    Incompatible with resolve_to_version / --source-anno (hard UsageError).
     """
+    # Dispatch to multi-anno path when more than one .anno path is given.
+    if len(anno_paths) > 1:
+        return _run_select_multi(
+            selector_path=selector_path,
+            anno_paths=anno_paths,
+            out=out,
+            fmt=fmt,
+            schema_override=schema_override,
+            allow_empty=allow_empty,
+            allow_empty_source=allow_empty_source,
+            include_matched_criteria=include_matched_criteria,
+            mid_bridge=mid_bridge,
+            coverage_column=coverage_column,
+            coverage_derive=coverage_derive,
+            max_per_population=max_per_population,
+            max_per_individual=max_per_individual,
+            quiet=quiet,
+        )
+
+    # --- Single-anno path ---
+    anno_path = anno_paths[0]
+
     # 0. Normalize coverage flags. --coverage-column and --coverage-derive
-    # are aliases (HLD §Coverage handling); both-set → UsageError.
+    # are aliases; both-set → UsageError.
     cli_coverage_column = _normalize_coverage_flags(coverage_column, coverage_derive)
 
     # 1. Load + validate selector.
@@ -208,132 +224,178 @@ def run_select(
     return EXIT_SUCCESS
 
 
-def _normalize_coverage_flags(
-    coverage_column: str | None, coverage_derive: str | None
-) -> str | None:
-    """Merge --coverage-column / --coverage-derive into a single value.
-
-    Per HLD §Coverage handling the two flags are aliases; passing both is
-    a usage error so the conflict is surfaced rather than silently
-    favoring one.
-    """
-    if coverage_column is not None and coverage_derive is not None:
-        raise UsageError(
-            errors=[
-                ValidationError(
-                    file="<cli>",
-                    line=1,
-                    col=1,
-                    pointer="/--coverage-column",
-                    message=("--coverage-column and --coverage-derive are aliases; pass only one."),
-                )
-            ],
-        )
-    return coverage_column or coverage_derive
-
-
-def _resolve_cross_version_inputs(
-    selector: Selector,
+def _run_select_multi(
     *,
-    source_anno: str | None,
-    target_anno: aadr_resolve.AnnoFrame,
-    schema_override_enum: aadr_resolve.types.SchemaClass | None,
-) -> aadr_resolve.AnnoFrame | None:
-    """Validate cross-version flag/selector combinations + load source .anno
-    when both are present. Returns the source AnnoFrame or None.
+    selector_path: str,
+    anno_paths: tuple[str, ...],
+    out: str | None,
+    fmt: str,
+    schema_override: str | None,
+    allow_empty: bool,
+    allow_empty_source: bool,
+    include_matched_criteria: bool,
+    mid_bridge: str | None,
+    coverage_column: str | None,
+    coverage_derive: str | None,
+    max_per_population: int | None,
+    max_per_individual: int | None,
+    quiet: bool,
+) -> int:
+    """Multi-anno select path (v0.4+). Runs select_samples per anno, merges
+    results via merge_multi_anno_results, writes via write_multi_anno_select_output.
 
-    Rules (LLD §4.1 step 4):
-    - resolve_to_version is None + source_anno is None: single-version path.
-    - resolve_to_version is None + source_anno is set: UsageError.
-    - resolve_to_version is set + source_anno is None: UsageError.
-    - Both set: load source AnnoFrame; verify version match against
-      selector.source_version (UsageError on mismatch); verify target
-      anno.version matches selector.resolve_to_version (UsageError on
-      mismatch).
+    Incompatible flags that would need design work beyond v0.4 scope:
+    --source-anno / resolve_to_version + multi-anno (hard UsageError).
     """
-    if selector.resolve_to_version is None:
-        if source_anno is not None:
-            raise UsageError(
-                errors=[
-                    ValidationError(
-                        file="<cli>",
-                        line=1,
-                        col=1,
-                        pointer="/--source-anno",
-                        message=(
-                            "--source-anno is meaningful only with cross-version "
-                            "resolution; selector does not set resolve_to_version"
-                        ),
-                    )
-                ],
+    cli_coverage_column = _normalize_coverage_flags(coverage_column, coverage_derive)
+
+    t_parse_start = time.monotonic()
+    _metadata, selector = load_selector(selector_path, allow_empty_source=allow_empty_source)
+
+    # Guard: resolve_to_version + multi-anno is unsupported in v0.4.
+    if selector.resolve_to_version is not None:
+        raise UsageError(
+            errors=[
+                ValidationError(
+                    file=selector_path,
+                    line=1,
+                    col=1,
+                    pointer="/resolve_to_version",
+                    message=(
+                        "multi-anno (multiple .anno paths) and resolve_to_version: "
+                        "are incompatible in v0.4. Use a single --anno for "
+                        "cross-version IID lift."
+                    ),
+                )
+            ],
+        )
+
+    schema_override_enum = _parse_schema_override(schema_override)
+
+    # Load and sort AnnoFrames by version (ascending; newer-version rows win
+    # during dedup in merge_multi_anno_results).
+    anno_frames: list[aadr_resolve.AnnoFrame] = []
+    for ap in anno_paths:
+        try:
+            af = aadr_resolve.AnnoFrame.from_path(ap, schema_override=schema_override_enum)
+        except aadr_resolve.SchemaDetectionError as e:
+            raise IOFailure(f"AADR .anno schema unrecognized at {ap}: {e}") from e
+        except (OSError, aadr_resolve.IOFailure) as e:
+            raise IOFailure(f"cannot load .anno at {ap}: {e}") from e
+        anno_frames.append(af)
+
+    # Sort by version (use the AADR version enum ordering as defined in the
+    # schema; fall back to lexicographic when the version isn't in the enum).
+    _AADR_VERSION_ORDER = ["v44.3", "v50.0", "v52.2", "v54.1", "v62.0", "v66.0"]
+
+    def _version_sort_key(af: aadr_resolve.AnnoFrame) -> int:
+        try:
+            return _AADR_VERSION_ORDER.index(af.version)
+        except ValueError:
+            return len(_AADR_VERSION_ORDER)  # unknown versions sort last
+
+    anno_frames.sort(key=_version_sort_key)
+    # Re-order anno_paths to match sorted anno_frames for accurate anno_files.
+    sorted_anno_paths = [str(af.path) if af.path else "<in-memory>" for af in anno_frames]
+
+    t_parse_end = time.monotonic()
+    parse_time = t_parse_end - t_parse_start
+
+    # v62 class-D coverage warning for each anno that qualifies.
+    if selector.coverage_column is None and cli_coverage_column is None:
+        for af in anno_frames:
+            _emit_v62_coverage_warning_if_needed(af, selector)
+
+    # Engine evaluation: one pass per anno.
+    t_eval_start = time.monotonic()
+    pairs: list[tuple[aadr_resolve.AnnoFrame, object]] = []
+    all_empty_globs: list[str] = []
+    for af in anno_frames:
+        per_result = select_samples(
+            af,
+            selector,
+            coverage_column=cli_coverage_column,
+            max_per_population=max_per_population,
+            max_per_individual=max_per_individual,
+            include_matched_criteria=include_matched_criteria,
+        )
+        pairs.append((af, per_result))
+        all_empty_globs.extend(per_result.warnings.empty_glob_patterns)
+
+    # Glob-expansion warning (collected across all annos, deduped).
+    unique_empty_globs = list(dict.fromkeys(all_empty_globs))
+    if unique_empty_globs:
+        sys.stderr.write(
+            f"WARNING: {len(unique_empty_globs)} Group_ID glob pattern(s) matched "
+            f"zero labels across all target annos: {unique_empty_globs}. "
+            f"Check for typos or AADR version drift.\n"
+        )
+
+    # Merge results.
+    merged = merge_multi_anno_results(
+        pairs,  # type: ignore[arg-type]
+        mid_bridge=Path(mid_bridge) if mid_bridge else None,
+    )
+    eval_time = time.monotonic() - t_eval_start
+
+    # allow_empty gate.
+    if merged.n_matched == 0 and not allow_empty:
+        raise SoftValidationFailure(
+            "selector matched 0 samples across all annos — output not written. "
+            "Pass --allow-empty for a sentinel-file write."
+        )
+
+    # Selector signature: includes sorted anno_versions for multi-anno.
+    sig = compute_signature(
+        selector,
+        cli_coverage_column=cli_coverage_column,
+        cli_max_per_population=max_per_population,
+        cli_max_per_individual=max_per_individual,
+        anno_versions=[af.version for af in anno_frames],
+    )
+
+    effective_cov_col = selector.coverage_column or cli_coverage_column
+    from dataclasses import replace
+    merged = replace(
+        merged,
+        anno_versions=sorted({af.version for af in anno_frames}),
+        anno_files=sorted_anno_paths,
+        selector_file=selector_path,
+        selector_signature=sig,
+        coverage_column_used=effective_cov_col,
+        schema_class=anno_frames[-1].schema_class.value,
+    )
+
+    # Write output.
+    fmt_enum = OutputFormat(fmt)
+    t_write_start = time.monotonic()
+    write_multi_anno_select_output(
+        merged,
+        pairs,  # type: ignore[arg-type]
+        fmt=fmt_enum,
+        out_path=Path(out) if out else None,
+        include_matched_criteria=include_matched_criteria,
+    )
+    write_time = time.monotonic() - t_write_start
+
+    # Stdout summary.
+    if not quiet:
+        versions_str = ", ".join(merged.anno_versions)
+        sys.stderr.write(
+            format_stdout_summary(
+                merged,
+                anno=anno_frames[-1],
+                parse_time=parse_time,
+                eval_time=eval_time,
+                write_time=write_time,
+                out_path_str=out,
+                selector_file=selector_path,
+                multi_anno_versions=versions_str,
             )
-        return None
-
-    # resolve_to_version is set.
-    if source_anno is None:
-        raise UsageError(
-            errors=[
-                ValidationError(
-                    file=str(selector.resolve_to_version),
-                    line=1,
-                    col=1,
-                    pointer="/resolve_to_version",
-                    message=(
-                        f"selector sets resolve_to_version: "
-                        f"{selector.resolve_to_version} but --source-anno was "
-                        f"not provided"
-                    ),
-                )
-            ],
+            + "\n"
         )
 
-    # Load source AnnoFrame.
-    try:
-        source_af = aadr_resolve.AnnoFrame.from_path(
-            source_anno,
-            schema_override=schema_override_enum,
-        )
-    except aadr_resolve.SchemaDetectionError as e:
-        raise IOFailure(f"source .anno schema unrecognized: {e}") from e
-    except (OSError, aadr_resolve.IOFailure) as e:
-        raise IOFailure(f"cannot load source .anno at {source_anno}: {e}") from e
-
-    # Verify source version matches selector.source_version (if set).
-    if selector.source_version is not None and source_af.version != selector.source_version:
-        raise UsageError(
-            errors=[
-                ValidationError(
-                    file=str(source_anno),
-                    line=1,
-                    col=1,
-                    pointer="/--source-anno",
-                    message=(
-                        f"--source-anno version is {source_af.version!r} but "
-                        f"selector source_version is {selector.source_version!r}"
-                    ),
-                )
-            ],
-        )
-
-    # Verify target version matches selector.resolve_to_version.
-    if target_anno.version != selector.resolve_to_version:
-        raise UsageError(
-            errors=[
-                ValidationError(
-                    file=str(target_anno.path) if target_anno.path else "<target-anno>",
-                    line=1,
-                    col=1,
-                    pointer="/resolve_to_version",
-                    message=(
-                        f"target .anno version is {target_anno.version!r} but "
-                        f"selector resolve_to_version is "
-                        f"{selector.resolve_to_version!r}"
-                    ),
-                )
-            ],
-        )
-
-    return source_af
+    return EXIT_SUCCESS
 
 
 def _emit_v62_coverage_warning_if_needed(anno: aadr_resolve.AnnoFrame, selector: Selector) -> None:
@@ -360,27 +422,3 @@ def _emit_v62_coverage_warning_if_needed(anno: aadr_resolve.AnnoFrame, selector:
     )
 
 
-def _parse_schema_override(value: str | None):  # type: ignore[no-untyped-def]
-    """Map a CLI --schema-override CLASS letter to aadr_resolve.SchemaClass.
-    None passes through (no override)."""
-    if value is None:
-        return None
-    from aadr_resolve.types import SchemaClass
-
-    try:
-        return SchemaClass[value]
-    except KeyError as e:
-        raise UsageError(
-            errors=[
-                ValidationError(
-                    file="<cli>",
-                    line=1,
-                    col=1,
-                    pointer="/--schema-override",
-                    message=(
-                        f"unknown schema class '{value}'; expected one of "
-                        f"{[c.name for c in SchemaClass]}"
-                    ),
-                )
-            ],
-        ) from e

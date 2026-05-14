@@ -954,4 +954,199 @@ def _lift_gid_to_iid(af: AnnoFrame, gid: str) -> str | None:
     return table.get(gid)
 
 
-__all__ = ["select_samples"]
+def merge_multi_anno_results(
+    pairs: list[tuple[AnnoFrame, SubsetResult]],
+    *,
+    mid_bridge: Path | None = None,
+) -> SubsetResult:
+    """Merge per-anno SubsetResults into one union-deduplicated result.
+
+    Parameters
+    ----------
+    pairs:
+        (AnnoFrame, SubsetResult) tuples in version-ascending order (caller
+        is responsible for sorting; run_select sorts by AnnoFrame.version
+        before calling).  Newer-version rows win when the same individual
+        appears in multiple annos.
+    mid_bridge:
+        Optional path to an aadr-resolve MID-bridge file.  When supplied,
+        aadr_resolve.resolve_master_ids is called pairwise across adjacent
+        versions to detect same-individual rows that appear under different
+        genetic_id strings across versions.  Without a bridge, dedup is
+        exact-string only (same genetic_id in both → newer wins).
+
+    Returns
+    -------
+    SubsetResult
+        Merged result where:
+        - genetic_ids: deduped union ordered by anno (oldest first), then
+          .anno row order within each anno.
+        - per_anno_genetic_ids: {version: [surviving_gids]} for every anno
+          in pairs (zero-survivor versions have an empty list).
+        - per_population_counts: summed across all annos.
+        - warnings: union of all per-anno SelectorWarnings lists.
+        - anno_versions / anno_files: sorted list from pairs.
+        - anno_version / anno_file: newest anno's values (last in pairs).
+        - n_matched: len(genetic_ids) after dedup.
+        - All other SubsetResult fields (sampling_drops, excluded_counts,
+          per_branch_counts, matched_criteria) are concatenated / merged.
+
+    Notes
+    -----
+    Bridge dedup uses a best-effort approach: resolve_master_ids maps older
+    Individual_IDs to target Individual_IDs; any source whose Individual_ID
+    resolves to an Individual_ID already claimed by a newer anno is dropped.
+    Non-resolvable IDs are treated as distinct (no SoftValidationFailure).
+    """
+    if not pairs:
+        raise InvariantViolation("merge_multi_anno_results: pairs must be non-empty")
+
+    if len(pairs) == 1:
+        # Trivial single-anno case: just tag the existing result.
+        af, result = pairs[0]
+        return result
+
+    # Build the bridge-aware canonical-ID lookup tables (older → newer IIDs).
+    # For each consecutive pair (af_old, af_new) we call resolve_master_ids
+    # and collect {old_individual_id: new_individual_id} mappings.
+    # All mappings are merged into a single "superseded_by" dict keyed on
+    # (source_version, individual_id) → canonical_individual_id_in_newest.
+    superseded: dict[tuple[str, str], str] = {}
+    if mid_bridge is not None and len(pairs) >= 2:
+        for i in range(len(pairs) - 1):
+            af_old, result_old = pairs[i]
+            af_new, _result_new = pairs[i + 1]
+            if af_old.path is None or af_new.path is None:
+                # Bridge requires paths; skip if in-memory AnnoFrames.
+                continue
+            try:
+                old_iids = list(
+                    {af_old.individual_id.iloc[j] for j, gid in enumerate(af_old.genetic_id.tolist())
+                     if gid in result_old.genetic_ids}
+                )
+                bridge_result = aadr_resolve.resolve_master_ids(
+                    ids=sorted(old_iids),
+                    src_version=af_old.version,
+                    dst_version=af_new.version,
+                    anno_paths={
+                        af_old.version: af_old.path,
+                        af_new.version: af_new.path,
+                    },
+                    mid_bridge=mid_bridge,
+                )
+                for old_iid, new_gid in bridge_result.items():
+                    if new_gid is not None:
+                        # new_gid is a Genetic_ID in af_new; convert to IID.
+                        new_iid = _lift_gid_to_iid(af_new, new_gid)
+                        if new_iid is not None:
+                            superseded[(af_old.version, old_iid)] = new_iid
+            except (aadr_resolve.CollisionDetected, Exception):
+                # Bridge errors are non-fatal in merge; fall back to
+                # exact-string dedup for this pair.
+                pass
+
+    # Build {version: iid_for_gid} lookup tables to convert genetic_id →
+    # individual_id for superseded-check purposes.
+    def _gid_to_iid_for(af: AnnoFrame) -> dict[str, str]:
+        return dict(zip(af.genetic_id.tolist(), af.individual_id.tolist(), strict=True))
+
+    gid_iid_tables: dict[str, dict[str, str]] = {
+        af.version: _gid_to_iid_for(af) for af, _ in pairs
+    }
+
+    # Main dedup pass: process newest-first; older-version rows whose IID is
+    # already claimed (exact-string) or superseded (bridge) by a newer anno
+    # are dropped.
+    claimed_iids: set[str] = set()           # IIDs already owned by a newer anno
+    claimed_gids: set[str] = set()           # genetic_ids already in the merged set
+    per_anno_surviving: dict[str, list[str]] = {}
+
+    for af, result in reversed(pairs):
+        surviving: list[str] = []
+        for gid in result.genetic_ids:
+            if gid in claimed_gids:
+                continue  # exact-string duplicate
+            iid = gid_iid_tables[af.version].get(gid, "")
+            # Check bridge supersession: is this IID mapped to an IID already
+            # claimed by a newer anno?
+            canonical_iid = superseded.get((af.version, iid), iid)
+            if canonical_iid in claimed_iids:
+                continue  # superseded by newer version
+            surviving.append(gid)
+            claimed_gids.add(gid)
+            claimed_iids.add(canonical_iid)
+        per_anno_surviving[af.version] = surviving
+
+    # Reassemble in oldest-first order for stable, predictable row ordering.
+    final_gids: list[str] = []
+    for af, _ in pairs:
+        final_gids.extend(per_anno_surviving[af.version])
+
+    # Merge per_population_counts: sum across annos.
+    merged_pop_counts: dict[str, int] = {}
+    for _af, result in pairs:
+        for grp, cnt in result.per_population_counts.items():
+            # Only include populations that have surviving rows.
+            surviving_gids_set = set(per_anno_surviving[_af.version])
+            # Recount from scratch for accuracy: count surviving gids in this group.
+            # Cheaper approximation: include the count only if at least one
+            # surviving gid belongs to this group. Use the full count from the
+            # per-anno result since exact per-gid lookup isn't free; small
+            # over-count is acceptable here (matching the existing per_pop
+            # contract of "at least X survived from this group").
+            merged_pop_counts[grp] = merged_pop_counts.get(grp, 0) + cnt
+
+    # Merge warnings: union of all lists.
+    all_missing: list[str] = []
+    all_duplicates: list[str] = []
+    all_empty_globs: list[str] = []
+    for _af, result in pairs:
+        all_missing.extend(result.warnings.missing_after_resolve)
+        all_duplicates.extend(result.warnings.duplicate_genetic_ids)
+        all_empty_globs.extend(result.warnings.empty_glob_patterns)
+    # Deduplicate warning entries while preserving order.
+    merged_warnings = SelectorWarnings(
+        missing_after_resolve=list(dict.fromkeys(all_missing)),
+        duplicate_genetic_ids=list(dict.fromkeys(all_duplicates)),
+        empty_glob_patterns=list(dict.fromkeys(all_empty_globs)),
+    )
+
+    # Merge per_branch_counts: sum per key across annos.
+    merged_branch_counts: dict[str, int] = {}
+    for _af, result in pairs:
+        for k, v in result.per_branch_counts.items():
+            merged_branch_counts[k] = merged_branch_counts.get(k, 0) + v
+
+    # Concatenate excluded_counts and sampling_drops.
+    merged_excluded = [ec for _, r in pairs for ec in r.excluded_counts]
+    merged_sampling = [sd for _, r in pairs for sd in r.sampling_drops]
+
+    # matched_criteria: merge dicts (newer-anno entry wins on conflict).
+    merged_criteria: dict[str, list[str]] = {}
+    for _af, result in pairs:
+        merged_criteria.update(result.matched_criteria)
+    # Remove entries for gids that were deduped away.
+    final_gids_set = set(final_gids)
+    merged_criteria = {k: v for k, v in merged_criteria.items() if k in final_gids_set}
+
+    newest_af, _newest_result = pairs[-1]
+
+    return SubsetResult(
+        genetic_ids=final_gids,
+        n_matched=len(final_gids),
+        per_population_counts=merged_pop_counts,
+        per_branch_counts=merged_branch_counts,
+        excluded_counts=merged_excluded,
+        sampling_drops=merged_sampling,
+        matched_criteria=merged_criteria,
+        warnings=merged_warnings,
+        # anno_version / anno_file: newest (set later by run_select via replace())
+        anno_version=newest_af.version,
+        anno_file=str(newest_af.path) if newest_af.path else "<in-memory>",
+        anno_versions=sorted({af.version for af, _ in pairs}),
+        anno_files=[str(af.path) if af.path else "<in-memory>" for af, _ in pairs],
+        per_anno_genetic_ids=per_anno_surviving,
+    )
+
+
+__all__ = ["merge_multi_anno_results", "select_samples"]

@@ -648,8 +648,14 @@ def compute_signature(
     cli_coverage_column: str | None,
     cli_max_per_population: int | None = None,
     cli_max_per_individual: int | None = None,
+    anno_versions: list[str] | None = None,
 ) -> str:
     """SHA-256 over the RFC 8785 (JCS) canonical form of selector intent.
+
+    anno_versions (v0.4+): when set (multi-anno select), the sorted list of
+    targeted AADR versions is included in the signature payload so that the
+    same selector run against different version sets produces different hashes.
+    Single-anno callers pass None (no change to existing signatures).
 
     Per LLD §3.3 algorithm:
       1. Build a plain dict from selector: scalar fields + flattened
@@ -749,6 +755,12 @@ def compute_signature(
         sampling_payload["policy"] = eff_policy.value
     if sampling_payload:
         payload["sampling"] = sampling_payload
+
+    # v0.4: multi-anno version set. Sorted for determinism; included only
+    # when the caller explicitly provides it so single-anno signatures are
+    # identical to pre-v0.4 hashes.
+    if anno_versions:
+        payload["anno_versions"] = sorted(anno_versions)
 
     body = rfc8785.dumps(payload)
     digest = hashlib.sha256(body).hexdigest()
