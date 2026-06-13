@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aadr-subset"
-version = "0.4.0"
+version = "0.4.1"
 description = "Declarative AADR panel subsetting from YAML selectors; the missing first-class tool for cohort definitions in ancient-DNA / population-genetics workflows."
 readme = "README.md"
 license = { text = "MIT" }
@@ -27,10 +27,10 @@ classifiers = [
 ]
 dependencies = [
     # aadr-resolve is the hard library dependency per HLD §aadr-resolve as a
-    # library dependency. Tracking the 0.2.x line: 0.2.0 ships the
-    # `MissingNativeFieldError`, `AnnoFrame.path`, and `resolve_master_ids`
-    # APIs that aadr-subset relies on.
-    "aadr-resolve>=0.2.0,<0.3",
+    # library dependency. The `MissingNativeFieldError`, `AnnoFrame.path`, and
+    # `resolve_master_ids` APIs that aadr-subset relies on were introduced in
+    # 0.2.0; 0.4.2 is the floor for its bug fixes.
+    "aadr-resolve>=0.4.2,<0.5",
     "pandas>=2.2,<3",
     "pyyaml>=6.0",
     "ruamel.yaml>=0.18",

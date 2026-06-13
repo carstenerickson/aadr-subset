@@ -1,6 +1,6 @@
 """aadr-subset: declarative AADR panel subsetting from YAML selectors."""
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 from aadr_subset.api import select
 from aadr_subset.errors import (

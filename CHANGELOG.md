@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-06-12
+
+### Changed
+
+- Require `aadr-resolve>=0.4.2` (was `>=0.2.0,<0.3`). 0.4.2 ships upstream
+  bug fixes; the supported range is now the 0.4 series (`>=0.4.2,<0.5`).
+
+### Fixed
+
+- Code-review pass: removed dead code, fixed correctness bugs, and corrected
+  stale documentation, with regression tests added for the fixed bugs.
+
 ## [0.4.0] — 2026-05-13
 
 ### Added
