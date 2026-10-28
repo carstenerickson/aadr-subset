@@ -211,7 +211,7 @@ def format_inspect_summary(result: SubsetResult, anno: AnnoFrame) -> str:
 
 def _compact_sha256(sig: str) -> str:
     """Return the 7+7 abbreviated form of a sha256: signature body."""
-    body = sig[len("sha256:"):]
+    body = sig[len("sha256:") :]
     return f"sha256:{body[:7]}...{body[-7:]}"
 
 

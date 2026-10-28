@@ -24,7 +24,6 @@ from aadr_subset.errors import SoftValidationFailure
 from aadr_subset.selector import load_selector
 from tests.fixtures.synthesize import make_loschbour_v66_fixture
 
-
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
@@ -59,9 +58,7 @@ def empty_selector_path(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def test_select_returns_subset_result_from_paths(
-    selector_path: Path, anno_path: Path
-) -> None:
+def test_select_returns_subset_result_from_paths(selector_path: Path, anno_path: Path) -> None:
     result = select(selector_path, anno_path)
 
     assert result.n_matched == 3
@@ -77,9 +74,7 @@ def test_select_returns_subset_result_from_paths(
 # ---------------------------------------------------------------------------
 
 
-def test_select_accepts_preloaded_selector(
-    selector_path: Path, anno_path: Path
-) -> None:
+def test_select_accepts_preloaded_selector(selector_path: Path, anno_path: Path) -> None:
     _meta, loaded_selector = load_selector(selector_path)
     result = select(loaded_selector, anno_path)
 
@@ -94,9 +89,7 @@ def test_select_accepts_preloaded_selector(
 # ---------------------------------------------------------------------------
 
 
-def test_select_accepts_preloaded_anno_frame(
-    selector_path: Path, anno_path: Path
-) -> None:
+def test_select_accepts_preloaded_anno_frame(selector_path: Path, anno_path: Path) -> None:
     anno_frame = aadr_resolve.AnnoFrame.from_path(anno_path)
     result = select(selector_path, anno_frame)
 
@@ -170,6 +163,6 @@ def test_public_error_types_importable_from_root() -> None:
 
 def test_public_types_importable_from_root() -> None:
     """Core result and selector types are accessible at the package root."""
-    from aadr_subset import SubsetResult, Selector, SelectorMetadata, SamplingSpec  # noqa: F401
+    from aadr_subset import SamplingSpec, Selector, SelectorMetadata, SubsetResult  # noqa: F401
 
     assert aadr_subset.select is select

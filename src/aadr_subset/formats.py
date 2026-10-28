@@ -34,10 +34,10 @@ import os
 import sys
 import tempfile
 from dataclasses import asdict
-
-import pandas as pd
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import pandas as pd
 
 from . import __version__
 from .errors import IOFailure
@@ -158,6 +158,7 @@ def write_select_output(
     else:
         # OutputFormat is a closed enum; this branch is unreachable.
         from .errors import InvariantViolation
+
         raise InvariantViolation(f"unknown output format: {fmt!r}")
 
 
@@ -307,9 +308,12 @@ def write_multi_anno_select_output(
     elif fmt == OutputFormat.TSV:
         _write_multi_anno_tsv(result, pairs, out_path)
     elif fmt == OutputFormat.JSON:
-        _write_multi_anno_json(result, pairs, include_matched_criteria=include_matched_criteria, out_path=out_path)
+        _write_multi_anno_json(
+            result, pairs, include_matched_criteria=include_matched_criteria, out_path=out_path
+        )
     else:
         from .errors import InvariantViolation
+
         raise InvariantViolation(f"unknown output format: {fmt!r}")
 
 
@@ -352,9 +356,7 @@ def _write_multi_anno_tsv(
             continue
 
         # Build a row-index lookup for this anno's surviving gids.
-        gid_to_row: dict[str, int] = {
-            gid: idx for idx, gid in enumerate(af.genetic_id.tolist())
-        }
+        gid_to_row: dict[str, int] = {gid: idx for idx, gid in enumerate(af.genetic_id.tolist())}
         iid_col = af.individual_id.tolist()
         grp_col = af.group_id.tolist()
         date_col = af.date_calbp
@@ -415,13 +417,11 @@ def _write_multi_anno_json(
     out["warnings"] = asdict(result.warnings)
     out["selector_signature"] = result.selector_signature
     out["selector_file"] = result.selector_file
-    out["anno_file"] = result.anno_file        # newest version (backwards compat)
+    out["anno_file"] = result.anno_file  # newest version (backwards compat)
     out["anno_version"] = result.anno_version  # newest version (backwards compat)
     out["anno_versions"] = list(result.anno_versions)
     out["anno_files"] = list(result.anno_files)
-    out["per_anno_n_matched"] = {
-        v: len(gids) for v, gids in result.per_anno_genetic_ids.items()
-    }
+    out["per_anno_n_matched"] = {v: len(gids) for v, gids in result.per_anno_genetic_ids.items()}
     out["schema_class"] = result.schema_class
     out["coverage_column"] = result.coverage_column_used
     out["aadr_subset_version"] = __version__

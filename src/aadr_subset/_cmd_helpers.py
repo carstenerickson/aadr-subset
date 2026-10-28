@@ -41,9 +41,7 @@ def normalize_coverage_flags(
                     line=1,
                     col=1,
                     pointer="/--coverage-column",
-                    message=(
-                        "--coverage-column and --coverage-derive are aliases; pass only one."
-                    ),
+                    message=("--coverage-column and --coverage-derive are aliases; pass only one."),
                 )
             ],
         )

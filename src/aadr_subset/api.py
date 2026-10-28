@@ -87,7 +87,7 @@ def select(
     allow_empty_source:
         Suppress errors from an empty individual_ids_source file.
     schema_override:
-        Force .anno schema class ("A"–"E"); passed to AnnoFrame.from_path.
+        Force .anno schema class ("A"-"E"); passed to AnnoFrame.from_path.
 
     Returns
     -------

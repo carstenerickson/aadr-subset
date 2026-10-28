@@ -16,7 +16,11 @@ import aadr_resolve
 
 from .._cmd_helpers import (
     normalize_coverage_flags as _normalize_coverage_flags,
+)
+from .._cmd_helpers import (
     parse_schema_override as _parse_schema_override,
+)
+from .._cmd_helpers import (
     resolve_cross_version_inputs as _resolve_cross_version_inputs,
 )
 from ..engine import merge_multi_anno_results, select_samples
@@ -31,7 +35,6 @@ from ..formats import write_multi_anno_select_output, write_select_output
 from ..reporting import format_run_summary
 from ..selector import compute_signature, load_selector
 from ..types import OutputFormat, Selector
-
 
 # Known AADR release version ordering (ascending). Used to sort AnnoFrames
 # passed to multi-anno select so newer-version rows win dedup.
@@ -438,5 +441,3 @@ def _emit_v62_coverage_warning_if_needed(anno: aadr_resolve.AnnoFrame, selector:
         "filter selects nothing. Use `--coverage-derive snps_hit_1240k` "
         "(pending CLI flag) for a derived proxy.\n"
     )
-
-

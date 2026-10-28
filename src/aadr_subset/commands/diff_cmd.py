@@ -18,6 +18,7 @@ from pathlib import Path
 
 import aadr_resolve
 
+from .._cmd_helpers import parse_schema_override as _parse_schema_override
 from ..engine import select_samples
 from ..errors import (
     EXIT_SUCCESS,
@@ -25,7 +26,6 @@ from ..errors import (
     UsageError,
     ValidationError,
 )
-from .._cmd_helpers import parse_schema_override as _parse_schema_override
 from ..reporting import build_diff_result, format_diff_summary, write_diff_json
 from ..selector import compute_signature, load_selector
 from ..types import DiffFormat, Selector, SubsetResult
@@ -131,5 +131,3 @@ def run_diff(
             atomic_write(out_path, body + "\n")
 
     return EXIT_SUCCESS
-
-

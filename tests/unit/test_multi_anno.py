@@ -24,15 +24,13 @@ import io
 import json
 from pathlib import Path
 
+import aadr_resolve
 import pytest
 
-import aadr_resolve
 from aadr_subset.engine import merge_multi_anno_results, select_samples
 from aadr_subset.formats import write_multi_anno_select_output
 from aadr_subset.types import OutputFormat, Selector
-
 from tests.fixtures.synthesize import SynthRow, write_class_e_anno
-
 
 # ---------------------------------------------------------------------------
 # Helpers: build minimal synthetic AnnoFrames without touching the filesystem
@@ -91,8 +89,15 @@ def anno_with_overlap_old(tmp_path: Path) -> aadr_resolve.AnnoFrame:
         tmp_path,
         "overlap_v44.3.anno",
         [
-            SynthRow(genetic_id="IND_SHARED", individual_id="SHARED", group_id="Pop1", coverage=0.5),
-            SynthRow(genetic_id="IND_UNIQUE_OLD", individual_id="UNIQUE_OLD", group_id="Pop1", coverage=0.4),
+            SynthRow(
+                genetic_id="IND_SHARED", individual_id="SHARED", group_id="Pop1", coverage=0.5
+            ),
+            SynthRow(
+                genetic_id="IND_UNIQUE_OLD",
+                individual_id="UNIQUE_OLD",
+                group_id="Pop1",
+                coverage=0.4,
+            ),
         ],
     )
 
@@ -104,8 +109,15 @@ def anno_with_overlap_new(tmp_path: Path) -> aadr_resolve.AnnoFrame:
         tmp_path,
         "overlap_v66.0.anno",
         [
-            SynthRow(genetic_id="IND_SHARED", individual_id="SHARED", group_id="Pop1", coverage=1.0),
-            SynthRow(genetic_id="IND_UNIQUE_NEW", individual_id="UNIQUE_NEW", group_id="Pop1", coverage=0.9),
+            SynthRow(
+                genetic_id="IND_SHARED", individual_id="SHARED", group_id="Pop1", coverage=1.0
+            ),
+            SynthRow(
+                genetic_id="IND_UNIQUE_NEW",
+                individual_id="UNIQUE_NEW",
+                group_id="Pop1",
+                coverage=0.9,
+            ),
         ],
     )
 
@@ -201,7 +213,6 @@ def test_multi_anno_tsv_source_version_column(
     merged = merge_multi_anno_results(pairs)  # type: ignore[arg-type]
 
     buf = io.StringIO()
-    import sys
     import unittest.mock as mock
 
     with mock.patch("sys.stdout", buf):
@@ -448,6 +459,6 @@ def test_run_select_multi_rejects_source_anno(
         )
     # UsageError stores the message in the ValidationError payload, not in the
     # base exception string.  Verify the flag name appears in at least one error.
-    assert any(
-        "--source-anno" in e.message for e in exc_info.value.errors
-    ), f"expected '--source-anno' in error messages; got {exc_info.value.errors}"
+    assert any("--source-anno" in e.message for e in exc_info.value.errors), (
+        f"expected '--source-anno' in error messages; got {exc_info.value.errors}"
+    )
