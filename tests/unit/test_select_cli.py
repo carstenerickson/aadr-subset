@@ -353,9 +353,7 @@ def test_select_format_tsv_to_stdout(tmp_path: Path, v66_anno: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_ancestry_pipeline_materialize_cohort_pattern(
-    tmp_path: Path, v66_anno: Path
-) -> None:
+def test_ancestry_pipeline_materialize_cohort_pattern(tmp_path: Path, v66_anno: Path) -> None:
     """Mirror ancestry-pipeline's materialize_cohort two-call pattern.
 
     Step 1: select --format ids  → .ids file

@@ -14,6 +14,8 @@ import aadr_resolve
 
 from .._cmd_helpers import (
     normalize_coverage_flags as _normalize_coverage_flags,
+)
+from .._cmd_helpers import (
     parse_schema_override as _parse_schema_override,
 )
 from ..engine import select_samples
@@ -112,5 +114,3 @@ def run_inspect(
         sys.stdout.write(summary + "\n")
 
     return EXIT_SUCCESS
-
-

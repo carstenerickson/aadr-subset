@@ -14,11 +14,13 @@ from pathlib import Path
 
 import aadr_resolve
 
-from ..engine import select_samples
 from .._cmd_helpers import (
     normalize_coverage_flags as _normalize_coverage_flags,
+)
+from .._cmd_helpers import (
     parse_schema_override as _parse_schema_override,
 )
+from ..engine import select_samples
 from ..errors import (
     EXIT_SUCCESS,
     IOFailure,
@@ -153,5 +155,3 @@ def run_report(
         )
 
     return EXIT_SUCCESS
-
-

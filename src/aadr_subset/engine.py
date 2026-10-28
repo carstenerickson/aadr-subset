@@ -1017,8 +1017,11 @@ def merge_multi_anno_results(
                 continue
             try:
                 old_iids = list(
-                    {af_old.individual_id.iloc[j] for j, gid in enumerate(af_old.genetic_id.tolist())
-                     if gid in result_old.genetic_ids}
+                    {
+                        af_old.individual_id.iloc[j]
+                        for j, gid in enumerate(af_old.genetic_id.tolist())
+                        if gid in result_old.genetic_ids
+                    }
                 )
                 bridge_result = aadr_resolve.resolve_master_ids(
                     ids=sorted(old_iids),
@@ -1046,15 +1049,13 @@ def merge_multi_anno_results(
     def _gid_to_iid_for(af: AnnoFrame) -> dict[str, str]:
         return dict(zip(af.genetic_id.tolist(), af.individual_id.tolist(), strict=True))
 
-    gid_iid_tables: dict[str, dict[str, str]] = {
-        af.version: _gid_to_iid_for(af) for af, _ in pairs
-    }
+    gid_iid_tables: dict[str, dict[str, str]] = {af.version: _gid_to_iid_for(af) for af, _ in pairs}
 
     # Main dedup pass: process newest-first; older-version rows whose IID is
     # already claimed (exact-string) or superseded (bridge) by a newer anno
     # are dropped.
-    claimed_iids: set[str] = set()           # IIDs already owned by a newer anno
-    claimed_gids: set[str] = set()           # genetic_ids already in the merged set
+    claimed_iids: set[str] = set()  # IIDs already owned by a newer anno
+    claimed_gids: set[str] = set()  # genetic_ids already in the merged set
     per_anno_surviving: dict[str, list[str]] = {}
 
     for af, result in reversed(pairs):
@@ -1086,12 +1087,12 @@ def merge_multi_anno_results(
         surviving = per_anno_surviving[af.version]
         if not surviving:
             continue
-        gid_to_grp: dict[str, object] = dict(
+        gid_to_grp: dict[str, str] = dict(
             zip(af.genetic_id.tolist(), af.group_id.tolist(), strict=True)
         )
         for gid in surviving:
             grp = gid_to_grp.get(gid, "")
-            merged_pop_counts[grp] = merged_pop_counts.get(grp, 0) + 1  # type: ignore[index]
+            merged_pop_counts[grp] = merged_pop_counts.get(grp, 0) + 1
 
     # Merge warnings: union of all lists.
     all_missing: list[str] = []
